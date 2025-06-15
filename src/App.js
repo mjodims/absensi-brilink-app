@@ -59,13 +59,13 @@ const appId = 'latucya-brilink-attendance-prod';
 // Jika tidak diganti, aplikasi tidak akan terhubung ke database Anda,
 // dan fitur penyimpanan/pengambilan data tidak akan berfungsi.
 const firebaseConfig = {
-  apiKey: "YOUR_FIREBASE_API_KEY", 
-  authDomain: "YOUR_FIREBASE_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_FIREBASE_PROJECT_ID",
-  storageBucket: "YOUR_FIREBASE_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_FIREBASE_MESSAGING_SENDER_ID",
-  appId: "YOUR_FIREBASE_APP_ID",
-  // measurementId: "YOUR_FIREBASE_MEASUREMENT_ID" // Opsional jika Anda tidak menggunakan Google Analytics for Firebase
+  apiKey: "AIzaSyDnkcXvEHJWo9F2Hw18dM62npzsOByy0Tw",
+  authDomain: "absensi-latucya.firebaseapp.com",
+  projectId: "absensi-latucya",
+  storageBucket: "absensi-latucya.firebasestorage.app",
+  messagingSenderId: "177573365968",
+  appId: "1:177573365968:web:eb42d8cc2aa16d9ef776d5",
+  measurementId: "G-W4W0S7DYRG"
 };
 
 // initialAuthToken hanya digunakan di lingkungan Canvas untuk autentikasi kustom.
