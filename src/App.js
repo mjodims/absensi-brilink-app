@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth'; // Removed signInWithCustomToken
-import { getFirestore, collection, addDoc, query, where, getDocs } from 'firebase/firestore'; // Removed doc, getDoc
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, addDoc, query, where, getDocs } from 'firebase/firestore';
 
 // Load SheetJS (XLSX library) from CDN
 const loadXlsxScript = () => {
@@ -360,7 +360,7 @@ function App() {
       console.error('Error checking attendance status:', e);
       showNotification('Gagal memeriksa status absen. Silakan coba lagi.', 'error');
     }
-  }, [db, userId, isAuthReady, userLocation, distanceToStore, showNotification, appId]); // Added appId to dependencies
+  }, [db, userId, isAuthReady, userLocation, distanceToStore, showNotification]); // Removed appId from dependencies
 
   // Effect untuk memanggil checkAttendanceStatus
   useEffect(() => {
@@ -681,7 +681,7 @@ function App() {
     } finally {
       setFilterLoading(false);
     }
-  }, [db, userId, isAuthReady, selectedMonth, selectedYear, showNotification, appId]); // Added showNotification, appId to dependencies
+  }, [db, userId, isAuthReady, selectedMonth, selectedYear, showNotification]); // Removed appId from dependencies
 
   // Panggil fetchDashboardRecords saat bulan/tahun atau auth state berubah
   useEffect(() => {
@@ -808,7 +808,7 @@ function App() {
     } finally {
       setIsGeneratingSummary(false);
     }
-  }, [dashboardRecords, selectedMonth, selectedYear, showNotification]);
+  }, [dashboardRecords, selectedMonth, selectedYear, showNotification]); // Removed appId from dependencies
 
 
   return (
