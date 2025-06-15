@@ -164,6 +164,7 @@ function App() {
   const [isAuthenticatedAdmin, setIsAuthenticatedAdmin] = useState(false); // State for admin authentication
   const [exportFormat, setExportFormat] = useState(''); // State for selected export format
   const [absentDaysCount, setAbsentDaysCount] = useState(0); // State baru untuk menyimpan jumlah hari absen
+  const [absenProcessStartTime, setAbsenProcessStartTime] = useState(null); // State untuk waktu mulai proses absen
 
   // State untuk fitur LLM
   const [llmSummary, setLlmSummary] = useState('');
@@ -215,7 +216,6 @@ function App() {
             setIsAuthReady(true);
           } catch (error) {
             console.error('Firebase Auth Error:', error);
-            setUserId(crypto.randomUUID()); // Fallback to a random ID for unauthenticated access
             showNotification('Gagal autentikasi Firebase. Menggunakan ID sementara.', 'error');
             setIsAuthReady(true);
           }
@@ -229,7 +229,7 @@ function App() {
       setUserId(crypto.randomUUID()); // Fallback
       setIsAuthReady(true);
     }
-  }, [showNotification]); // showNotification added as dependency
+  }, [showNotification]);
 
 
   // Set interval untuk waktu saat ini
@@ -249,7 +249,7 @@ function App() {
     }
 
     setIsLoadingLocation(true);
-    showNotification('Mendeteksi lokasi Anda...', 'info', 0); // Notifikasi tidak hilang otomatis
+    showNotification('Mendeteksi lokasi Anda...', 'info', 0);
 
     const success = (position) => {
       const { latitude, longitude } = position.coords;
@@ -264,16 +264,15 @@ function App() {
       setDistanceToStore(dist);
 
       setIsLoadingLocation(false);
-      setHasLocationAttemptFailed(false); // Reset on success
-      showNotification(''); // Hapus notifikasi loading
+      setHasLocationAttemptFailed(false);
+      showNotification('');
 
-      // Update status button setelah lokasi terdeteksi
       if (attendanceStatus.includes('BELUM ABSEN') && dist <= MAX_DISTANCE_METERS) {
         setIsAbsenButtonDisabled(false);
         showNotification('Lokasi Anda terdeteksi. Silakan absen.', 'info');
       } else if (dist > MAX_DISTANCE_METERS) {
         setIsAbsenButtonDisabled(true);
-        setAttendanceStatus('GAGAL ABSEN'); // Set status to failed
+        setAttendanceStatus('GAGAL ABSEN');
         showNotification(
           `Anda berada ${dist.toFixed(
             2
@@ -284,15 +283,15 @@ function App() {
     };
 
     const error = (err) => {
-      console.error('Error getting location:', err); // Log the full error object
-      console.error('Error code:', err.code, 'Error message:', err.message); // More explicit details
+      console.error('Error getting location:', err);
+      console.error('Error code:', err.code, 'Error message:', err.message);
 
       setIsLoadingLocation(false);
       setUserLocation(null);
       setDistanceToStore(null);
-      setIsAbsenButtonDisabled(true); // Disable button if location fails
-      setHasLocationAttemptFailed(true); // Mark as failed
-      setAttendanceStatus('GAGAL ABSEN'); // Set status to failed due to location issue
+      setIsAbsenButtonDisabled(true);
+      setHasLocationAttemptFailed(true);
+      setAttendanceStatus('GAGAL ABSEN');
 
       let errorMessage = 'Gagal mendapatkan lokasi Anda! Mohon izinkan akses lokasi di browser Anda.';
       if (err.code === err.PERMISSION_DENIED) {
@@ -302,7 +301,7 @@ function App() {
       } else if (err.code === err.TIMEOUT) {
         errorMessage = 'Waktu habis untuk mendapatkan lokasi. Periksa koneksi atau GPS Anda.';
       }
-      showNotification(errorMessage, 'error', 0); // Notifikasi tidak hilang otomatis
+      showNotification(errorMessage, 'error', 0);
     };
 
     const options = {
@@ -312,7 +311,7 @@ function App() {
     };
 
     navigator.geolocation.getCurrentPosition(success, error, options);
-  }, [attendanceStatus, showNotification]); // showNotification added as dependency
+  }, [attendanceStatus, showNotification]);
 
 
   // Periksa status absen saat komponen dimuat atau userID berubah
@@ -330,7 +329,7 @@ function App() {
       const querySnapshot = await getDocs(q);
 
       if (!querySnapshot.empty) {
-        const docData = querySnapshot.docs[0].data(); // Renamed to avoid conflict with imported doc
+        const docData = querySnapshot.docs[0].data();
         setAttendanceStatus(`SUDAH ABSEN (Pukul ${docData.time})`);
         setLastCheckInTime(docData.timestamp);
         setIsAbsenButtonDisabled(true);
@@ -346,7 +345,7 @@ function App() {
           showNotification('Lokasi Anda terdeteksi. Silakan absen.', 'info');
         } else if (userLocation && distanceToStore !== null && distanceToStore > MAX_DISTANCE_METERS) {
           setIsAbsenButtonDisabled(true);
-          setAttendanceStatus('GAGAL ABSEN'); // Set status to failed
+          setAttendanceStatus('GAGAL ABSEN');
           showNotification(
             `Anda berada ${distanceToStore.toFixed(
               2
@@ -384,12 +383,12 @@ function App() {
       showNotification('Aplikasi belum siap. Silakan refresh halaman.', 'error');
       return;
     }
-    if (isAbsenButtonDisabled) return; // Tombol harus sudah disable jika validasi gagal
+    if (isAbsenButtonDisabled) return;
 
     // Validasi ulang sebelum absen
     if (!userLocation) {
       showNotification('Lokasi belum terdeteksi. Mohon tunggu. Jika terus-menerus, izinkan akses lokasi.', 'warning', 0);
-      getLocation(); // Coba lagi dapatkan lokasi jika belum terdeteksi
+      getLocation();
       return;
     }
 
@@ -398,6 +397,8 @@ function App() {
         return;
     }
 
+    setAbsenProcessStartTime(new Date()); // Catat waktu mulai proses absen
+
     const currentTimestamp = new Date();
     const todayStr = currentTimestamp.toISOString().slice(0, 10); // FormatYYYY-MM-DD
     const currentTimeStr = currentTimestamp.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -405,26 +406,28 @@ function App() {
     let status = 'Berhasil';
     let reason = null;
 
-    if (attendanceStatus.includes('SUDAH ABSEN')) { // Check for 'SUDAH ABSEN' more broadly
+    if (attendanceStatus.includes('SUDAH ABSEN')) {
+        const durationSeconds = absenProcessStartTime ? ((new Date().getTime() - absenProcessStartTime.getTime()) / 1000) : 0;
         showNotification(
-            `Anda SUDAH ABSEN hari ini pada ${lastCheckInTime ? new Date(lastCheckInTime).toLocaleTimeString('id-ID') : ''}. Anda hanya bisa absen sekali dalam satu hari kalender.`,
+            `Anda SUDAH ABSEN hari ini pada ${lastCheckInTime ? new Date(lastCheckInTime).toLocaleTimeString('id-ID') : ''} (durasi: ${durationSeconds.toFixed(2)} detik). Anda hanya bisa absen sekali dalam satu hari kalender.`,
             'warning'
         );
-        return; // Jangan lanjutkan jika sudah absen
+        setAbsenProcessStartTime(null); // Reset
+        return;
     }
 
     if (distanceToStore > MAX_DISTANCE_METERS) {
       status = 'Gagal';
       reason = 'Terlalu Jauh';
-      setAttendanceStatus('GAGAL ABSEN'); // Explicitly set status to failed
+      setAttendanceStatus('GAGAL ABSEN');
+      const durationSeconds = absenProcessStartTime ? ((new Date().getTime() - absenProcessStartTime.getTime()) / 1000) : 0;
       showNotification(
-        `ABSEN GAGAL! Anda berada ${distanceToStore.toFixed(
-          2
-        )} meter dari toko. Mohon mendekat ke lokasi toko untuk absen.`,
+        `ABSEN GAGAL! Anda berada ${distanceToStore.toFixed(2)} meter dari toko (durasi: ${durationSeconds.toFixed(2)} detik). Mohon mendekat ke lokasi toko untuk absen.`,
         'error'
       );
-      setIsAbsenButtonDisabled(true); // Pastikan tombol tetap disabled
-      return; // Jangan lanjutkan jika terlalu jauh
+      setIsAbsenButtonDisabled(true);
+      setAbsenProcessStartTime(null); // Reset
+      return;
     }
 
     try {
@@ -443,16 +446,20 @@ function App() {
       setAttendanceStatus(`SUDAH ABSEN (Pukul ${currentTimeStr})`);
       setLastCheckInTime(currentTimestamp.toISOString());
       setShowAbsenButton(false);
+      const durationSeconds = absenProcessStartTime ? ((new Date().getTime() - absenProcessStartTime.getTime()) / 1000) : 0;
       showNotification(
-        `Absen Anda BERHASIL dicatat pada ${currentTimeStr}! Terima kasih.`,
+        `Absen Anda BERHASIL dicatat pada ${currentTimeStr} (durasi: ${durationSeconds.toFixed(2)} detik)! Terima kasih.`,
         'success'
       );
     } catch (e) {
       console.error('Error adding document: ', e);
-      showNotification('Gagal mencatat absen. Silakan coba lagi.', 'error');
-      setIsAbsenButtonDisabled(false); // Re-enable button on error
-      setShowAbsenButton(true); // Ensure button is shown
-      setAttendanceStatus('GAGAL ABSEN'); // Set status to failed on Firestore error
+      const durationSeconds = absenProcessStartTime ? ((new Date().getTime() - absenProcessStartTime.getTime()) / 1000) : 0;
+      showNotification(`Gagal mencatat absen (durasi: ${durationSeconds.toFixed(2)} detik). Silakan coba lagi.`, 'error');
+      setIsAbsenButtonDisabled(false);
+      setShowAbsenButton(true);
+      setAttendanceStatus('GAGAL ABSEN');
+    } finally {
+      setAbsenProcessStartTime(null); // Pastikan selalu direset setelah proses selesai
     }
   };
 
@@ -914,8 +921,9 @@ function App() {
 
       {/* Header Aplikasi */}
       <header className="w-full max-w-lg bg-white rounded-lg shadow-xl p-6 mb-6 text-center">
-        <h1 className="text-xl md:text-3xl font-bold text-blue-800 mb-2">Aplikasi Absensi Karyawan</h1>
-        <h2 className="text-3xl md:text-4xl font-semibold text-orange-600 leading-tight">Latucya BRILink</h2>
+        {/* Perubahan: Ukuran judul aplikasi dibuat lebih besar */}
+        <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-blue-800 mb-2">Aplikasi Absensi Karyawan</h1>
+        <h2 className="text-4xl md:text-5xl lg:text-6xl font-semibold text-orange-600 leading-tight">Latucya BRILink</h2>
       </header>
 
       {/* Navigasi (Sederhana) */}
@@ -926,7 +934,7 @@ function App() {
             setIsAuthenticatedAdmin(false); // Reset admin auth when navigating away
             setAdminPassword('');
           }}
-          className={`px-3 py-2 sm:px-6 sm:py-3 rounded-full font-semibold text-sm sm:text-base transition-all duration-300 ${
+          className={`px-6 py-3 sm:px-8 sm:py-4 rounded-full font-semibold text-base sm:text-lg transition-all duration-300 ${
             currentPage === 'attendance'
               ? 'bg-orange-500 text-white shadow-lg'
               : 'bg-gray-200 text-gray-700 hover:bg-orange-100'
@@ -936,7 +944,7 @@ function App() {
         </button>
         <button
           onClick={() => setCurrentPage('dashboard')}
-          className={`px-3 py-2 sm:px-6 sm:py-3 rounded-full font-semibold text-sm sm:text-base transition-all duration-300 ${
+          className={`px-6 py-3 sm:px-8 sm:py-4 rounded-full font-semibold text-base sm:text-lg transition-all duration-300 ${
             currentPage === 'dashboard'
               ? 'bg-orange-500 text-white shadow-lg'
               : 'bg-gray-200 text-gray-700 hover:bg-orange-100'
@@ -981,9 +989,10 @@ function App() {
                 : 'bg-red-100 border-l-4 border-red-500' // Merah (for GAGAL ABSEN)
             }`}
           >
-            {/* Perubahan di sini: menghapus class untuk memungkinkan teks wrapping */}
+            {/* Perubahan di sini untuk membuat 2 baris */}
             <p className="text-lg font-bold text-gray-800">
-              Status Absen Hari Ini: {attendanceStatus}
+              Status Absen Hari Ini: <br />
+              {attendanceStatus}
             </p>
           </div>
 
@@ -1102,7 +1111,10 @@ function App() {
 
               {/* Ringkasan Statistik */}
               <div className="bg-gray-100 rounded-lg p-4 mb-6 shadow-inner">
-                <h4 className="text-lg font-bold text-gray-700 mb-2">Statistik Bulan Ini:</h4>
+                {/* Perubahan: Ganti "Statistik Bulan Ini" menjadi nama bulan yang dipilih */}
+                <h4 className="text-lg font-bold text-gray-700 mb-2">
+                  Statistik {new Date(selectedYear, selectedMonth - 1).toLocaleString('id-ID', { month: 'long', year: 'numeric' })}:
+                </h4>
                 <p className="text-md text-gray-600">
                   <span className="font-medium">Total Hari Absen:</span>{' '}
                   <span className="font-bold text-red-600">{absentDaysCount} hari</span>
@@ -1209,6 +1221,11 @@ function App() {
           )}
         </main>
       )}
+
+      {/* Footer Aplikasi */}
+      <footer className="w-full max-w-lg mt-8 text-center text-gray-200 text-sm">
+        Dikembangkan oleh Muhammad Jodi Marties Seviadi
+      </footer>
     </div>
   );
 }
