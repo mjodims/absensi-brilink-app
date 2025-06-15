@@ -163,6 +163,7 @@ function App() {
   const [adminPassword, setAdminPassword] = useState(''); // State for password input
   const [isAuthenticatedAdmin, setIsAuthenticatedAdmin] = useState(false); // State for admin authentication
   const [exportFormat, setExportFormat] = useState(''); // State for selected export format
+  const [absentDaysCount, setAbsentDaysCount] = useState(0); // State baru untuk menyimpan jumlah hari absen
 
   // State untuk fitur LLM
   const [llmSummary, setLlmSummary] = useState('');
@@ -488,6 +489,9 @@ function App() {
       csvContent += rowData.map((field) => `"${String(field).replace(/"/g, '""')}"`).join(',') + '\n';
     });
 
+    // Tambahkan ringkasan hari absen
+    csvContent += `\nTotal Hari Absen (Tidak ada absen berhasil di hari tsb.): ${absentDaysCount}\n`;
+
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
@@ -541,6 +545,11 @@ function App() {
         row.reason || '',
       ]);
     });
+
+    // Tambahkan ringkasan hari absen di baris paling bawah
+    wsData.push([]); // Baris kosong
+    wsData.push(['Total Hari Absen (Tidak ada absen berhasil di hari tsb.):', absentDaysCount]);
+
 
     const ws = window.XLSX.utils.aoa_to_sheet(wsData);
     const wb = window.XLSX.utils.book_new();
@@ -617,6 +626,11 @@ function App() {
         record.reason || ''
     ]);
 
+    // Menyiapkan data untuk ringkasan di bawah tabel
+    const summaryData = [
+      ['Total Hari Absen (Tidak ada absen berhasil di hari tsb.):', absentDaysCount]
+    ];
+
     doc.autoTable({
         head: [tableColumn],
         body: tableRows,
@@ -643,6 +657,28 @@ function App() {
             5: { cellWidth: 15 }, // Jarak (m)
             6: { cellWidth: 15 }, // Status
             7: { cellWidth: 30 }  // Alasan
+        },
+        didParseCell: function (data) {
+          // Add border to the last row of the table
+          if (data.section === 'body' && data.row.index === tableRows.length - 1) {
+            data.cell.styles.lineWidth = 0.5; // Example: Add a border for the last row
+            data.cell.styles.lineColor = [0, 0, 0];
+          }
+        },
+        didDrawPage: function(data) {
+          // Get the y-coordinate of the end of the table
+          let finalY = doc.autoTable.previous.finalY;
+
+          // Add some space below the table
+          finalY += 10;
+
+          // Add summary data
+          doc.setFontSize(10);
+          doc.setTextColor(0, 0, 0); // Black color for summary text
+          summaryData.forEach((row, index) => {
+              doc.text(row[0], 14, finalY + (index * 5)); // Adjust x-coordinate (14) and spacing (5) as needed
+              doc.text(String(row[1]), 80, finalY + (index * 5)); // Adjust x-coordinate (80) and spacing (5) as needed
+          });
         }
     });
 
@@ -660,6 +696,8 @@ function App() {
 
     setFilterLoading(true);
     setDashboardRecords([]);
+    setAbsentDaysCount(0); // Reset count before fetching
+
     try {
       const startDate = new Date(selectedYear, selectedMonth - 1, 1);
       const endDate = new Date(selectedYear, selectedMonth, 0); // Last day of the month
@@ -675,13 +713,39 @@ function App() {
       // Sort records by timestamp in descending order
       records.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       setDashboardRecords(records);
+
+      // --- Logika Perhitungan Hari Absen ---
+      const attendanceByDate = {}; // { 'YYYY-MM-DD': { hasSuccessful: false, hasFailed: false } }
+      records.forEach(record => {
+        const dateKey = record.date;
+        if (!attendanceByDate[dateKey]) {
+          attendanceByDate[dateKey] = { hasSuccessful: false, hasFailed: false };
+        }
+        if (record.status === 'Berhasil') {
+          attendanceByDate[dateKey].hasSuccessful = true;
+        } else if (record.status === 'Gagal') {
+          attendanceByDate[dateKey].hasFailed = true;
+        }
+      });
+
+      let calculatedAbsentDays = 0;
+      for (const dateKey in attendanceByDate) {
+        // Jika tidak ada absen berhasil pada tanggal tersebut, tetapi ada setidaknya satu upaya absen (berhasil atau gagal)
+        // Kita hitung sebagai absen jika tidak ada 'Berhasil' tapi ada catatan (berarti semua gagal di hari itu).
+        if (!attendanceByDate[dateKey].hasSuccessful && attendanceByDate[dateKey].hasFailed) {
+            calculatedAbsentDays++;
+        }
+      }
+      setAbsentDaysCount(calculatedAbsentDays);
+      // --- Akhir Logika Perhitungan Hari Absen ---
+
     } catch (e) {
       console.error('Error fetching dashboard records:', e);
       showNotification('Gagal mengambil data rekap absensi.', 'error');
     } finally {
       setFilterLoading(false);
     }
-  }, [db, userId, isAuthReady, selectedMonth, selectedYear, showNotification]); // Removed appId from dependencies
+  }, [db, userId, isAuthReady, selectedMonth, selectedYear, showNotification, appId]); // Removed appId from dependencies for useCallback, but it's still needed if we reference it directly, so putting it back for safety.
 
   // Panggil fetchDashboardRecords saat bulan/tahun atau auth state berubah
   useEffect(() => {
@@ -763,14 +827,15 @@ function App() {
         Total catatan absensi: ${dashboardRecords.length}
         Absen berhasil: ${successfulCheckIns}
         Absen gagal: ${failedCheckIns}
-        Jumlah hari absensi unik: ${uniqueDates}
+        Jumlah hari absensi unik (ada catatan absen): ${uniqueDates}
+        Total hari absen (tidak ada absen berhasil di hari tsb.): ${absentDaysCount}
         Total hari dalam bulan ini: ${totalDaysInMonth}
         
         Data detail setiap absensi:
         ${dashboardRecords.map(rec => `Tanggal: ${rec.date}, Waktu: ${rec.time}, Status: ${rec.status}, Jarak dari toko: ${rec.distanceToStore} meter, Alasan: ${rec.reason || 'N/A'}`).join('\n')}
 
         Mohon berikan ringkasan yang komprehensif dan wawasan penting (insight) dari data absensi di atas. Fokus pada:
-        1. Statistik kunci (total absen, berhasil, gagal, hari unik).
+        1. Statistik kunci (total absen, berhasil, gagal, hari unik, hari absen).
         2. Keteraturan absensi.
         3. Jika ada absen gagal, berikan analisis singkat mengapa dan saran perbaikan.
         4. Tentukan apakah karyawan tersebut menunjukkan kinerja absensi yang baik atau perlu perhatian.
@@ -808,7 +873,7 @@ function App() {
     } finally {
       setIsGeneratingSummary(false);
     }
-  }, [dashboardRecords, selectedMonth, selectedYear, showNotification]); // Removed appId from dependencies
+  }, [dashboardRecords, selectedMonth, selectedYear, showNotification, absentDaysCount]); // Added absentDaysCount to dependencies
 
 
   return (
@@ -1032,6 +1097,17 @@ function App() {
                 >
                   {filterLoading ? 'Memuat...' : 'Tampilkan Rekap'}
                 </button>
+              </div>
+
+              {/* Ringkasan Statistik */}
+              <div className="bg-gray-100 rounded-lg p-4 mb-6 shadow-inner">
+                <h4 className="text-lg font-bold text-gray-700 mb-2">Statistik Bulan Ini:</h4>
+                <p className="text-md text-gray-600">
+                  <span className="font-medium">Total Hari Absen:</span>{' '}
+                  <span className="font-bold text-red-600">{absentDaysCount} hari</span>
+                  <span className="text-sm text-gray-500 ml-2">(Tidak ada absen berhasil di hari tsb.)</span>
+                </p>
+                {/* Anda bisa menambahkan statistik lain di sini jika diinginkan */}
               </div>
 
               {/* Tampilan Rekap Absen */}
