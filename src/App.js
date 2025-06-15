@@ -23,7 +23,7 @@ const loadPdfScript = () => {
   return new Promise((resolve, reject) => {
     // Check if jspdf and autoTable plugin are already loaded
     if (window.jspdf && window.jspdf.jsPDF && window.jspdf.jsPDF.prototype.autoTable) {
-      resolve();
+      resolve(); // Already loaded
       return;
     }
 
@@ -177,7 +177,8 @@ function App() {
     if (duration > 0) {
       setTimeout(() => setNotification({ message: '', type: '' }), duration);
     }
-  }, []); // showNotification sekarang adalah useCallback
+  }, []);
+
 
   // Inisialisasi Firebase dan Autentikasi
   useEffect(() => {
@@ -190,7 +191,6 @@ function App() {
         const app = initializeApp(firebaseConfig); // This might still error if config is totally invalid
         const authInstance = getAuth(app);
         const dbInstance = getFirestore(app);
-        // setAuth(authInstance); // Removed unused setAuth
         setDb(dbInstance);
         signInAnonymously(authInstance).then(userCred => setUserId(userCred.user.uid)).catch(e => console.error(e));
         setIsAuthReady(true);
@@ -201,7 +201,6 @@ function App() {
       const authInstance = getAuth(app);
       const dbInstance = getFirestore(app);
 
-      // setAuth(authInstance); // Removed unused setAuth
       setDb(dbInstance);
 
       const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
@@ -212,10 +211,11 @@ function App() {
           // Hanya signInAnonymously karena initialAuthToken tidak ada
           try {
             await signInAnonymously(authInstance);
-            setUserId(authInstance.currentUser?.uid || crypto.randomUUID()); // Pastikan ID ada
+            setUserId(authInstance.currentUser?.uid || crypto.randomUUID());
             setIsAuthReady(true);
           } catch (error) {
             console.error('Firebase Auth Error:', error);
+            setUserId(crypto.randomUUID());
             showNotification('Gagal autentikasi Firebase. Menggunakan ID sementara.', 'error');
             setIsAuthReady(true);
           }
@@ -226,7 +226,7 @@ function App() {
     } catch (error) {
       console.error('Error initializing Firebase:', error);
       showNotification('Gagal inisialisasi Firebase. Periksa konfigurasi.', 'error');
-      setUserId(crypto.randomUUID()); // Fallback
+      setUserId(crypto.randomUUID());
       setIsAuthReady(true);
     }
   }, [showNotification]);
@@ -244,7 +244,7 @@ function App() {
   const getLocation = useCallback(() => {
     if (!navigator.geolocation) {
       showNotification('Geolokasi tidak didukung oleh browser Anda.', 'error', 0);
-      setHasLocationAttemptFailed(true); // Mark as failed
+      setHasLocationAttemptFailed(true);
       return;
     }
 
@@ -275,7 +275,7 @@ function App() {
         setAttendanceStatus('GAGAL ABSEN');
         showNotification(
           `Anda berada ${dist.toFixed(
-            2
+            1
           )} meter dari toko. Mohon mendekat ke lokasi toko untuk absen.`,
           'error'
         );
@@ -314,7 +314,7 @@ function App() {
   }, [attendanceStatus, showNotification]);
 
 
-  // Periksa status absen saat komponen dimuat atau userID berubah
+  // Periksa status absen saat komponen dimuat, userID berubah, ATAU KETIKA HALAMAN BERUBAH KE ATTENDANCE
   const checkAttendanceStatus = useCallback(async () => {
     if (!db || !userId || !isAuthReady) return;
 
@@ -337,7 +337,7 @@ function App() {
         showNotification(`Anda SUDAH ABSEN hari ini pada ${docData.time}.`, 'warning');
       } else {
         setAttendanceStatus('BELUM ABSEN');
-        setLastCheckInTime(null);
+        setLastCheckInTime(null); // Ini aman karena hanya di-set saat BELUM ABSEN
         setShowAbsenButton(true);
         // Hanya aktifkan tombol jika lokasi sudah terdeteksi dan dalam radius
         if (userLocation && distanceToStore !== null && distanceToStore <= MAX_DISTANCE_METERS) {
@@ -348,7 +348,7 @@ function App() {
           setAttendanceStatus('GAGAL ABSEN');
           showNotification(
             `Anda berada ${distanceToStore.toFixed(
-              2
+              1
             )} meter dari toko. Mohon mendekat ke lokasi toko untuk absen.`,
             'error'
           );
@@ -364,13 +364,13 @@ function App() {
 
   // Effect untuk memanggil checkAttendanceStatus
   useEffect(() => {
-    checkAttendanceStatus();
-  }, [checkAttendanceStatus]);
-
+    if (currentPage === 'attendance') { // Panggil hanya jika di halaman attendance
+      checkAttendanceStatus();
+    }
+  }, [currentPage, checkAttendanceStatus]); // Tambahkan currentPage sebagai dependency
 
   // Effect untuk mendapatkan lokasi saat komponen dimuat atau auth ready
   useEffect(() => {
-    // Only attempt to get location if auth is ready, no location yet, not already loading, and no previous attempt failed persistently
     if (isAuthReady && !userLocation && !isLoadingLocation && !hasLocationAttemptFailed) {
       getLocation();
     }
@@ -412,7 +412,7 @@ function App() {
             `Anda SUDAH ABSEN hari ini pada ${lastCheckInTime ? new Date(lastCheckInTime).toLocaleTimeString('id-ID') : ''} (durasi: ${durationSeconds.toFixed(2)} detik). Anda hanya bisa absen sekali dalam satu hari kalender.`,
             'warning'
         );
-        setAbsenProcessStartTime(null); // Reset
+        setAbsenProcessStartTime(null);
         return;
     }
 
@@ -422,23 +422,23 @@ function App() {
       setAttendanceStatus('GAGAL ABSEN');
       const durationSeconds = absenProcessStartTime ? ((new Date().getTime() - absenProcessStartTime.getTime()) / 1000) : 0;
       showNotification(
-        `ABSEN GAGAL! Anda berada ${distanceToStore.toFixed(2)} meter dari toko (durasi: ${durationSeconds.toFixed(2)} detik). Mohon mendekat ke lokasi toko untuk absen.`,
+        `ABSEN GAGAL! Anda berada ${distanceToStore.toFixed(1)} meter dari toko (durasi: ${durationSeconds.toFixed(2)} detik). Mohon mendekat ke lokasi toko untuk absen.`,
         'error'
       );
       setIsAbsenButtonDisabled(true);
-      setAbsenProcessStartTime(null); // Reset
+      setAbsenProcessStartTime(null);
       return;
     }
 
     try {
-      setIsAbsenButtonDisabled(true); // Disable button to prevent multiple clicks
+      setIsAbsenButtonDisabled(true);
       await addDoc(collection(db, `artifacts/${appId}/users/${userId}/attendance`), {
         timestamp: currentTimestamp.toISOString(),
         date: todayStr,
         time: currentTimeStr,
         latitude: userLocation.latitude,
         longitude: userLocation.longitude,
-        distanceToStore: parseFloat(distanceToStore.toFixed(2)),
+        distanceToStore: parseFloat(distanceToStore.toFixed(1)),
         status: status,
         reason: reason,
       });
@@ -459,7 +459,7 @@ function App() {
       setShowAbsenButton(true);
       setAttendanceStatus('GAGAL ABSEN');
     } finally {
-      setAbsenProcessStartTime(null); // Pastikan selalu direset setelah proses selesai
+      setAbsenProcessStartTime(null);
     }
   };
 
@@ -489,7 +489,7 @@ function App() {
         row.time,
         row.latitude,
         row.longitude,
-        row.distanceToStore,
+        row.distanceToStore.toFixed(1),
         row.status,
         row.reason || '',
       ];
@@ -547,7 +547,7 @@ function App() {
         row.time,
         row.latitude,
         row.longitude,
-        row.distanceToStore,
+        row.distanceToStore.toFixed(1),
         row.status,
         row.reason || '',
       ]);
@@ -628,7 +628,7 @@ function App() {
         record.time,
         record.latitude.toFixed(6),
         record.longitude.toFixed(6),
-        record.distanceToStore.toFixed(2),
+        record.distanceToStore.toFixed(1),
         record.status,
         record.reason || ''
     ]);
@@ -787,18 +787,18 @@ function App() {
   const handleAdminLogin = () => {
     if (adminPassword === ADMIN_PASSWORD) {
       setIsAuthenticatedAdmin(true);
-      setNotification({ message: '', type: '' }); // Clear any previous password error
+      setNotification({ message: '', type: '' });
     } else {
       showNotification('Kata sandi salah!', 'error');
-      setAdminPassword(''); // Clear password input
+      setAdminPassword('');
     }
   };
 
   const handleAdminLogout = () => {
     setIsAuthenticatedAdmin(false);
     setAdminPassword('');
-    setDashboardRecords([]); // Clear dashboard data on logout
-    setCurrentPage('attendance'); // Go back to attendance page
+    setDashboardRecords([]);
+    setCurrentPage('attendance');
   };
 
   const handleExport = () => {
@@ -809,7 +809,7 @@ function App() {
     } else if (exportFormat === 'pdf') {
       exportToPdf(`rekap-absensi-${selectedMonth}-${selectedYear}.pdf`, dashboardRecords);
     }
-    setExportFormat(''); // Reset dropdown
+    setExportFormat('');
   };
 
   // Fungsi untuk menghasilkan ringkasan absensi dengan LLM (Gemini API)
@@ -820,7 +820,7 @@ function App() {
     }
 
     setIsGeneratingSummary(true);
-    setLlmSummary(''); // Clear previous summary
+    setLlmSummary('');
     showNotification('Membuat ringkasan absensi dengan AI...', 'info', 0);
 
     try {
@@ -853,7 +853,7 @@ function App() {
       chatHistory.push({ role: "user", parts: [{ text: prompt }] });
       
       const payload = { contents: chatHistory };
-      const apiKey = ""; // Canvas will provide this at runtime
+      const apiKey = "";
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
       const response = await fetch(apiUrl, {
@@ -869,7 +869,7 @@ function App() {
         const text = result.candidates[0].content.parts[0].text;
         setLlmSummary(text);
         showNotification('Ringkasan absensi berhasil dibuat!', 'success');
-        setShowSummaryModal(true); // Show modal after generating
+        setShowSummaryModal(true);
       } else {
         console.error('Unexpected API response structure:', result);
         showNotification('Gagal mendapatkan ringkasan dari AI. Format respons tidak sesuai.', 'error');
@@ -921,20 +921,23 @@ function App() {
 
       {/* Header Aplikasi */}
       <header className="w-full max-w-lg bg-white rounded-lg shadow-xl p-6 mb-6 text-center">
-        {/* Perubahan: Ukuran judul aplikasi dibuat lebih besar */}
-        <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-blue-800 mb-2">Aplikasi Absensi Karyawan</h1>
-        <h2 className="text-4xl md:text-5xl lg:text-6xl font-semibold text-orange-600 leading-tight">Latucya BRILink</h2>
+        {/* Perubahan: JUDUL DIBUAT KAPITAL SEMUA, diubah warnanya menjadi hitam */}
+        <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold uppercase text-black mb-2">Aplikasi Absensi Karyawan</h1>
+        {/* Perubahan: warna teks "Latucya" diubah menjadi biru BRI dan teks "BRILink" diubah menjadi warna Oranye */}
+        <h2 className="text-4xl md:text-5xl lg:text-6xl font-semibold leading-tight">
+          <span style={{ color: '#004F98' }}>Latucya</span> <span className="text-orange-600">BRILink</span>
+        </h2>
       </header>
 
       {/* Navigasi (Sederhana) */}
-      <div className="w-full max-w-lg bg-white rounded-lg shadow-md p-4 mb-6 flex justify-around">
+      <div className="w-full max-w-lg bg-white rounded-xl shadow-md p-4 mb-6 flex justify-around">
         <button
           onClick={() => {
             setCurrentPage('attendance');
             setIsAuthenticatedAdmin(false); // Reset admin auth when navigating away
             setAdminPassword('');
           }}
-          className={`px-6 py-3 sm:px-8 sm:py-4 rounded-full font-semibold text-base sm:text-lg transition-all duration-300 ${
+          className={`px-6 py-3 sm:px-8 sm:py-4 rounded-xl font-semibold text-xl sm:text-2xl transition-all duration-300 ${
             currentPage === 'attendance'
               ? 'bg-orange-500 text-white shadow-lg'
               : 'bg-gray-200 text-gray-700 hover:bg-orange-100'
@@ -944,7 +947,7 @@ function App() {
         </button>
         <button
           onClick={() => setCurrentPage('dashboard')}
-          className={`px-6 py-3 sm:px-8 sm:py-4 rounded-full font-semibold text-base sm:text-lg transition-all duration-300 ${
+          className={`px-6 py-3 sm:px-8 sm:py-4 rounded-xl font-semibold text-xl sm:text-2xl transition-all duration-300 ${
             currentPage === 'dashboard'
               ? 'bg-orange-500 text-white shadow-lg'
               : 'bg-gray-200 text-gray-700 hover:bg-orange-100'
@@ -975,7 +978,7 @@ function App() {
               {isLoadingLocation
                 ? '...'
                 : distanceToStore !== null
-                ? `${distanceToStore.toFixed(2)} meter`
+                ? `${distanceToStore.toFixed(1)} meter`
                 : (hasLocationAttemptFailed ? 'Tidak terdeteksi' : 'Mendeteksi...')}
             </p>
           </div>
@@ -989,7 +992,6 @@ function App() {
                 : 'bg-red-100 border-l-4 border-red-500' // Merah (for GAGAL ABSEN)
             }`}
           >
-            {/* Perubahan di sini untuk membuat 2 baris */}
             <p className="text-lg font-bold text-gray-800">
               Status Absen Hari Ini: <br />
               {attendanceStatus}
@@ -1000,7 +1002,7 @@ function App() {
             <button
               onClick={handleAbsen}
               disabled={isAbsenButtonDisabled || isLoadingLocation}
-              className={`w-full py-4 px-6 rounded-full text-white text-xl font-bold shadow-lg transition-all duration-300
+              className={`w-full py-4 px-6 rounded-xl text-white text-xl font-bold shadow-lg transition-all duration-300
               ${
                 isAbsenButtonDisabled || isLoadingLocation
                   ? 'bg-gray-400 cursor-not-allowed'
@@ -1012,18 +1014,15 @@ function App() {
           ) : (
             <button
               onClick={() => {
-                // Reset state untuk memungkinkan absen lagi di hari berikutnya
-                setAttendanceStatus('BELUM ABSEN');
-                setLastCheckInTime(null);
                 setIsAbsenButtonDisabled(true);
                 setShowAbsenButton(true);
                 setUserLocation(null);
                 setDistanceToStore(null);
-                setHasLocationAttemptFailed(false); // Reset location error status
-                showNotification('', ''); // Clear notifications
-                getLocation(); // Refresh location for next possible check-in
+                setHasLocationAttemptFailed(false);
+                showNotification('', '');
+                getLocation();
               }}
-              className="w-full py-4 px-6 rounded-full bg-blue-600 text-white text-xl font-bold shadow-lg hover:bg-blue-700 transition-all duration-300"
+              className="w-full py-4 px-6 rounded-xl bg-blue-600 text-white text-xl font-bold shadow-lg hover:bg-blue-700 transition-all duration-300"
             >
               Kembali ke Halaman Utama
             </button>
@@ -1042,7 +1041,7 @@ function App() {
               <input
                 type="password"
                 placeholder="Masukkan Kata Sandi"
-                className="w-full max-w-xs p-3 border border-gray-300 rounded-lg mb-4 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full max-w-xs p-3 border border-gray-300 rounded-xl mb-4 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 value={adminPassword}
                 onChange={(e) => setAdminPassword(e.target.value)}
                 onKeyPress={(e) => {
@@ -1053,7 +1052,7 @@ function App() {
               />
               <button
                 onClick={handleAdminLogin}
-                className="w-full max-w-xs py-3 px-6 rounded-lg bg-orange-500 text-white font-semibold shadow-lg hover:bg-orange-600 transition-all duration-300"
+                className="w-full max-w-xs py-3 px-6 rounded-xl bg-orange-500 text-white font-semibold shadow-lg hover:bg-orange-600 transition-all duration-300"
               >
                 Masuk
               </button>
@@ -1066,7 +1065,7 @@ function App() {
                 </h3>
                 <button
                   onClick={handleAdminLogout}
-                  className="px-4 py-2 rounded-full bg-red-500 text-white text-sm font-semibold shadow-md hover:bg-red-600 transition-all duration-300"
+                  className="px-4 py-2 rounded-xl bg-red-500 text-white text-sm font-semibold shadow-md hover:bg-red-600 transition-all duration-300"
                 >
                   Logout
                 </button>
@@ -1075,7 +1074,7 @@ function App() {
               {/* Filter Rekap Absen */}
               <div className="flex flex-col sm:flex-row gap-4 mb-6">
                 <select
-                  className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="flex-1 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   value={selectedMonth}
                   onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
                 >
@@ -1086,7 +1085,7 @@ function App() {
                   ))}
                 </select>
                 <select
-                  className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="flex-1 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   value={selectedYear}
                   onChange={(e) => setSelectedYear(parseInt(e.target.value))}
                 >
@@ -1099,7 +1098,7 @@ function App() {
                 <button
                   onClick={fetchDashboardRecords}
                   disabled={filterLoading}
-                  className={`w-full sm:w-auto px-6 py-3 rounded-lg text-white font-semibold transition-all duration-300 ${
+                  className={`w-full sm:w-auto px-6 py-3 rounded-xl text-white font-semibold transition-all duration-300 ${
                     filterLoading
                       ? 'bg-gray-400 cursor-not-allowed'
                       : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800'
@@ -1111,7 +1110,6 @@ function App() {
 
               {/* Ringkasan Statistik */}
               <div className="bg-gray-100 rounded-lg p-4 mb-6 shadow-inner">
-                {/* Perubahan: Ganti "Statistik Bulan Ini" menjadi nama bulan yang dipilih */}
                 <h4 className="text-lg font-bold text-gray-700 mb-2">
                   Statistik {new Date(selectedYear, selectedMonth - 1).toLocaleString('id-ID', { month: 'long', year: 'numeric' })}:
                 </h4>
@@ -1120,7 +1118,6 @@ function App() {
                   <span className="font-bold text-red-600">{absentDaysCount} hari</span>
                   <span className="text-sm text-gray-500 ml-2">(Tidak ada absen berhasil di hari tsb.)</span>
                 </p>
-                {/* Anda bisa menambahkan statistik lain di sini jika diinginkan */}
               </div>
 
               {/* Tampilan Rekap Absen */}
@@ -1157,7 +1154,7 @@ function App() {
                         </p>
                         <p className="text-sm text-gray-600">
                           <span className="font-medium">Jarak ke Toko:</span>{' '}
-                          {record.distanceToStore.toFixed(2)} meter
+                          {record.distanceToStore.toFixed(1)} meter
                         </p>
                         <p className="text-sm text-gray-700">
                           <span className="font-medium">Status:</span>{' '}
@@ -1181,7 +1178,7 @@ function App() {
               {/* Fitur Ekspor Data (Dropdown) */}
               <div className="flex flex-col sm:flex-row gap-4 mt-6">
                 <select
-                  className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="flex-1 p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   value={exportFormat}
                   onChange={(e) => setExportFormat(e.target.value)}
                   disabled={dashboardRecords.length === 0}
@@ -1194,7 +1191,7 @@ function App() {
                 <button
                   onClick={handleExport}
                   disabled={dashboardRecords.length === 0 || !exportFormat}
-                  className={`w-full sm:w-auto py-3 px-6 rounded-lg text-white text-lg font-bold shadow-lg transition-all duration-300 ${
+                  className={`w-full sm:w-auto py-3 px-6 rounded-xl text-white text-lg font-bold shadow-lg transition-all duration-300 ${
                     dashboardRecords.length === 0 || !exportFormat
                       ? 'bg-gray-400 cursor-not-allowed'
                       : 'bg-orange-500 hover:bg-orange-600 active:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-opacity-50'
@@ -1208,7 +1205,7 @@ function App() {
               <button
                 onClick={generateAttendanceSummary}
                 disabled={dashboardRecords.length === 0 || isGeneratingSummary}
-                className={`w-full py-3 px-6 rounded-lg text-white text-lg font-bold shadow-lg transition-all duration-300 mt-4
+                className={`w-full py-3 px-6 rounded-xl text-white text-lg font-bold shadow-lg transition-all duration-300 mt-4
                   ${
                     dashboardRecords.length === 0 || isGeneratingSummary
                       ? 'bg-gray-400 cursor-not-allowed'
