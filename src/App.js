@@ -159,6 +159,8 @@ function App() {
   // New state for location validation notification box
   const [locationValidityMessage, setLocationValidityMessage] = useState('');
   const [locationValidityType, setLocationValidityType] = useState('info'); // 'success', 'error', 'warning', 'info'
+  const [countdown, setCountdown] = useState(0); // State for countdown timer
+  const [isCountdownActive, setIsCountdownActive] = useState(false); // State to control countdown visibility
 
   // State untuk Dashboard
   const [dashboardRecords, setDashboardRecords] = useState([]);
@@ -283,8 +285,24 @@ function App() {
     setLocationValidityMessage('Mendeteksi lokasi...');
     setLocationValidityType('info');
     showNotification('Mendeteksi lokasi Anda...', 'info', 0);
+    
+    // Start countdown
+    let currentCountdown = 10; // Initial countdown value
+    setCountdown(currentCountdown);
+    setIsCountdownActive(true);
+    const countdownInterval = setInterval(() => {
+      currentCountdown--;
+      setCountdown(currentCountdown);
+      if (currentCountdown <= 0) {
+        clearInterval(countdownInterval);
+        setIsCountdownActive(false);
+      }
+    }, 1000);
 
     const success = (position) => {
+      clearInterval(countdownInterval); // Stop countdown on success
+      setIsCountdownActive(false);
+
       const { latitude, longitude } = position.coords;
       setUserLocation({ latitude, longitude });
 
@@ -310,6 +328,9 @@ function App() {
     };
 
     const error = (err) => {
+      clearInterval(countdownInterval); // Stop countdown on error
+      setIsCountdownActive(false);
+
       console.error('Error getting location:', err);
       console.error('Error code:', err.code, 'Error message:', err.message);
 
@@ -335,11 +356,15 @@ function App() {
 
     const options = {
       enableHighAccuracy: true,
-      timeout: 10000,
+      timeout: 10000, // Reverted to 10 seconds
       maximumAge: 0,
     };
 
     navigator.geolocation.getCurrentPosition(success, error, options);
+
+    // Cleanup function for useEffect (not for this specific useCallback, but good practice)
+    // If this useCallback was in a useEffect, this would be relevant for unmount
+    // For this case, manual clearInterval in success/error is needed.
   }, [showNotification]);
 
   // Periksa status absen saat komponen dimuat, userID berubah, ATAU KETIKA HALAMAN BERUBAH KE ATTENDANCE
@@ -1035,7 +1060,7 @@ function App() {
             <p className="text-md text-gray-600">
               <span className="font-medium">Jarak ke Toko:</span>{' '}
               {isLoadingLocation
-                ? '...'
+                ? `... ${isCountdownActive ? `(${countdown} detik)` : ''}` // Added countdown here
                 : distanceToStore !== null
                 ? `${distanceToStore.toFixed(1)} meter`
                 : (hasLocationAttemptFailed ? 'Tidak terdeteksi' : 'Mendeteksi...')}
