@@ -156,6 +156,10 @@ function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [hasLocationAttemptFailed, setHasLocationAttemptFailed] = useState(false); // New state to track location errors
 
+  // New state for location validation notification box
+  const [locationValidityMessage, setLocationValidityMessage] = useState('');
+  const [locationValidityType, setLocationValidityType] = useState('info'); // 'success', 'error', 'warning', 'info'
+
   // State untuk Dashboard
   const [dashboardRecords, setDashboardRecords] = useState([]);
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
@@ -270,10 +274,14 @@ function App() {
     if (!navigator.geolocation) {
       showNotification('Geolokasi tidak didukung oleh browser Anda.', 'error', 0);
       setHasLocationAttemptFailed(true);
+      setLocationValidityMessage('Geolokasi tidak didukung.');
+      setLocationValidityType('error');
       return;
     }
 
     setIsLoadingLocation(true);
+    setLocationValidityMessage('Mendeteksi lokasi...');
+    setLocationValidityType('info');
     showNotification('Mendeteksi lokasi Anda...', 'info', 0);
 
     const success = (position) => {
@@ -290,20 +298,15 @@ function App() {
 
       setIsLoadingLocation(false);
       setHasLocationAttemptFailed(false);
-      showNotification(''); // Clear loading notification
+      showNotification(''); // Clear general loading notification
 
-      // Ini akan dipicu ulang oleh `checkAttendanceStatus`
-      // if (attendanceStatus.includes('BELUM ABSEN') && dist <= MAX_DISTANCE_METERS) {
-      //   setIsAbsenButtonDisabled(false);
-      //   showNotification('Lokasi Anda terdeteksi. Silakan absen.', 'info');
-      // } else if (dist > MAX_DISTANCE_METERS) {
-      //   setIsAbsenButtonDisabled(true);
-      //   setAttendanceStatus('GAGAL ABSEN');
-      //   showNotification(
-      //     `Anda berada ${dist.toFixed(1)} meter dari toko. Mohon mendekat ke lokasi toko untuk absen.`,
-      //     'error'
-      //   );
-      // }
+      if (dist <= MAX_DISTANCE_METERS) {
+        setLocationValidityMessage('Lokasi Valid');
+        setLocationValidityType('success');
+      } else {
+        setLocationValidityMessage(`Lokasi Tidak Valid (Terlalu Jauh: ${dist.toFixed(1)} meter)`);
+        setLocationValidityType('error');
+      }
     };
 
     const error = (err) => {
@@ -313,11 +316,11 @@ function App() {
       setIsLoadingLocation(false);
       setUserLocation(null);
       setDistanceToStore(null);
-      setIsAbsenButtonDisabled(true);
+      setIsAbsenButtonDisabled(true); // Disable absen button if location fails
       setHasLocationAttemptFailed(true);
       setAttendanceStatus('GAGAL ABSEN'); // Set status to failed due to location issue
 
-      let errorMessage = 'Gagal mendapatkan lokasi Anda! Mohon izinkan akses lokasi di browser Anda.';
+      let errorMessage = 'Lokasi Tidak Ditemukan. Mohon izinkan akses lokasi di browser Anda.';
       if (err.code === err.PERMISSION_DENIED) {
         errorMessage = 'Izin lokasi ditolak. Mohon izinkan akses lokasi di browser Anda.';
       } else if (err.code === err.POSITION_UNAVAILABLE) {
@@ -325,7 +328,9 @@ function App() {
       } else if (err.code === err.TIMEOUT) {
         errorMessage = 'Waktu habis untuk mendapatkan lokasi. Periksa koneksi atau GPS Anda.';
       }
-      showNotification(errorMessage, 'error', 0); // Notifikasi tidak hilang otomatis
+      setLocationValidityMessage(errorMessage);
+      setLocationValidityType('warning'); // Use warning for "not found" or permission issues
+      showNotification(errorMessage, 'error', 0); // General notification, won't disappear automatically
     };
 
     const options = {
@@ -335,7 +340,7 @@ function App() {
     };
 
     navigator.geolocation.getCurrentPosition(success, error, options);
-  }, [showNotification]); // attendanceStatus removed as dependency here to prevent circular dependency for getLocation
+  }, [showNotification]);
 
   // Periksa status absen saat komponen dimuat, userID berubah, ATAU KETIKA HALAMAN BERUBAH KE ATTENDANCE
   const checkAttendanceStatus = useCallback(async () => {
@@ -368,20 +373,15 @@ function App() {
           setLastCheckInTime(null);
           setShowAbsenButton(true);
 
+          // Update absen button status based on current location validity
           if (userLocation && distanceToStore !== null) {
             if (distanceToStore <= MAX_DISTANCE_METERS) {
               setIsAbsenButtonDisabled(false);
-              showNotification('Lokasi Anda terdeteksi. Silakan absen.', 'info');
             } else {
               setIsAbsenButtonDisabled(true);
-              setAttendanceStatus('GAGAL ABSEN'); // Tetapkan sebagai gagal jika jauh
-              showNotification(
-                `Anda berada ${distanceToStore.toFixed(1)} meter dari toko. Mohon mendekat ke lokasi toko untuk absen.`,
-                'error'
-              );
             }
           } else {
-            setIsAbsenButtonDisabled(true);
+            setIsAbsenButtonDisabled(true); // Default disabled if no location info
           }
         }
       } else {
@@ -390,29 +390,22 @@ function App() {
         setLastCheckInTime(null);
         setShowAbsenButton(true);
 
-        // Logika untuk mengaktifkan/menonaktifkan tombol absen berdasarkan lokasi
+        // Update absen button status based on current location validity
         if (userLocation && distanceToStore !== null) {
           if (distanceToStore <= MAX_DISTANCE_METERS) {
             setIsAbsenButtonDisabled(false); // Aktifkan jika di dalam jangkauan
-            showNotification('Lokasi Anda terdeteksi. Silakan absen.', 'info');
           } else {
             setIsAbsenButtonDisabled(true); // Nonaktifkan jika di luar jangkauan
-            setAttendanceStatus('GAGAL ABSEN'); // Update status jika terlalu jauh
-            showNotification(
-              `Anda berada ${distanceToStore.toFixed(1)} meter dari toko. Mohon mendekat ke lokasi toko untuk absen.`,
-              'error'
-            );
           }
         } else {
-          // Jika lokasi belum terdeteksi, tombol tetap disabled
-          setIsAbsenButtonDisabled(true);
+          setIsAbsenButtonDisabled(true); // Jika lokasi belum terdeteksi, tombol tetap disabled
         }
       }
     } catch (e) {
       console.error('Error checking attendance status:', e);
       showNotification('Gagal memeriksa status absen. Silakan coba lagi.', 'error');
     }
-  }, [db, userId, isAuthReady, userLocation, distanceToStore, showNotification]); // Dependencies tetap sama agar update lokasi memicu check
+  }, [db, userId, isAuthReady, userLocation, distanceToStore, showNotification]);
 
   // Effect sentral untuk halaman attendance:
   // Memastikan checkAttendanceStatus dan getLocation dipicu dengan benar
@@ -440,7 +433,7 @@ function App() {
     // Validasi ulang sebelum absen
     if (!userLocation) {
       showNotification('Lokasi belum terdeteksi. Mohon tunggu. Jika terus-menerus, izinkan akses lokasi.', 'warning', 0);
-      getLocation();
+      getLocation(); // Try to get location again
       return;
     }
 
@@ -999,6 +992,8 @@ function App() {
             setUserLocation(null);
             setDistanceToStore(null);
             setHasLocationAttemptFailed(false);
+            setLocationValidityMessage(''); // Clear location validity message
+            setLocationValidityType('info'); // Reset location validity type
             showNotification('', ''); // Clear any lingering notifications
           }}
           className={`px-6 py-3 sm:px-8 sm:py-4 rounded-xl font-semibold text-xl sm:text-2xl transition-all duration-300 ${
@@ -1047,6 +1042,23 @@ function App() {
             </p>
           </div>
 
+          {/* Location Validity Notification Box */}
+          {locationValidityMessage && (
+            <div
+              className={`p-3 rounded-lg mb-4 shadow-md transition-all duration-300 border-l-4 ${
+                locationValidityType === 'success' ? 'bg-green-100 border-green-500' :
+                locationValidityType === 'error' ? 'bg-red-100 border-red-500' :
+                locationValidityType === 'warning' ? 'bg-orange-100 border-orange-500' :
+                'bg-blue-100 border-blue-500' // Default info
+              }`}
+            >
+              <p className="text-base font-bold text-gray-800">
+                Status Lokasi: <br />
+                {locationValidityMessage}
+              </p>
+            </div>
+          )}
+
           <div
             className={`p-4 rounded-lg mb-6 shadow-md transition-all duration-300 ${
               attendanceStatus.includes('BELUM ABSEN')
@@ -1086,6 +1098,8 @@ function App() {
                 setUserLocation(null); // Reset lokasi untuk memaksa re-get
                 setDistanceToStore(null); // Reset jarak
                 setHasLocationAttemptFailed(false); // Reset status gagal lokasi
+                setLocationValidityMessage(''); // Clear location validity message
+                setLocationValidityType('info'); // Reset location validity type
                 showNotification('', ''); // Hapus notifikasi lama
                 // getLocation() dan checkAttendanceStatus() akan terpanggil melalui useEffect
               }}
@@ -1096,7 +1110,7 @@ function App() {
           )}
 
           <p className="text-xs text-gray-500 mt-4 text-center">
-            * Absen hanya bisa dilakukan sekali per hari dalam radius dekat dari toko.
+            * Absen hanya bisa dilakukan satu kali per hari dalam radius yang dekat dengan toko.
           </p>
         </main>
       ) : (
