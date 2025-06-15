@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+// Import `indexedDBLocalPersistence` dan `setPersistence`
+import { getAuth, signInAnonymously, onAuthStateChanged, indexedDBLocalPersistence, setPersistence } from 'firebase/auth';
 import { getFirestore, collection, addDoc, query, where, getDocs } from 'firebase/firestore';
 
 // Load SheetJS (XLSX library) from CDN
@@ -139,7 +140,7 @@ const Notification = ({ message, type, onClose }) => {
 // Komponen Utama Aplikasi
 function App() {
   const [db, setDb] = useState(null);
-  const [userId, setUserId] = useState(null); // Removed auth state
+  const [userId, setUserId] = useState(null); // Firebase Auth UID
   const [currentPage, setCurrentPage] = useState('attendance'); // 'attendance' or 'dashboard'
 
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -163,7 +164,8 @@ function App() {
   const [adminPassword, setAdminPassword] = useState(''); // State for password input
   const [isAuthenticatedAdmin, setIsAuthenticatedAdmin] = useState(false); // State for admin authentication
   const [exportFormat, setExportFormat] = useState(''); // State for selected export format
-  const [absentDaysCount, setAbsentDaysCount] = useState(0); // State baru untuk menyimpan jumlah hari absen
+  const [presentDaysCount, setPresentDaysCount] = useState(0); // State baru untuk menyimpan jumlah hari hadir
+
   const [absenProcessStartTime, setAbsenProcessStartTime] = useState(null); // State untuk waktu mulai proses absen
 
   // State untuk fitur LLM
@@ -180,15 +182,14 @@ function App() {
   }, []);
 
 
-  // Inisialisasi Firebase dan Autentikasi
+  // Inisialisasi Firebase dan Autentikasi dengan Persistensi
   useEffect(() => {
     try {
-      // Pastikan firebaseConfig memiliki apiKey dan projectId yang valid
       if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
         console.error("Firebase config is incomplete. Please update it with your actual Firebase project details.");
         showNotification("Firebase tidak terkonfigurasi. Aplikasi mungkin tidak berfungsi penuh.", "error", 0);
         // Fallback to anonymous sign-in even if config is totally invalid
-        const app = initializeApp(firebaseConfig); // This might still error if config is totally invalid
+        const app = initializeApp(firebaseConfig);
         const authInstance = getAuth(app);
         const dbInstance = getFirestore(app);
         setDb(dbInstance);
@@ -203,30 +204,54 @@ function App() {
 
       setDb(dbInstance);
 
-      const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
-        if (user) {
-          setUserId(user.uid);
-          setIsAuthReady(true);
-        } else {
-          // Hanya signInAnonymously karena initialAuthToken tidak ada
-          try {
-            await signInAnonymously(authInstance);
-            setUserId(authInstance.currentUser?.uid || crypto.randomUUID());
-            setIsAuthReady(true);
-          } catch (error) {
-            console.error('Firebase Auth Error:', error);
-            setUserId(crypto.randomUUID());
-            showNotification('Gagal autentikasi Firebase. Menggunakan ID sementara.', 'error');
-            setIsAuthReady(true);
-          }
-        }
-      });
-
-      return () => unsubscribe();
+      // --- CRITICAL CHANGE: Set persistence for the auth session ---
+      setPersistence(authInstance, indexedDBLocalPersistence)
+        .then(() => {
+          console.log("Firebase Auth persistence set to IndexedDB Local.");
+          // Now sign in anonymously or listen for state changes
+          const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
+            if (user) {
+              setUserId(user.uid); // Gunakan UID dari Firebase Auth
+              setIsAuthReady(true);
+              console.log("Firebase user authenticated with UID:", user.uid);
+            } else {
+              try {
+                console.log("No Firebase user found, signing in anonymously...");
+                await signInAnonymously(authInstance);
+                setUserId(authInstance.currentUser?.uid || crypto.randomUUID()); // Pastikan UID tersedia
+                setIsAuthReady(true);
+                console.log("Signed in anonymously with UID:", authInstance.currentUser?.uid);
+              } catch (error) {
+                console.error('Firebase Anonymous Auth Error:', error);
+                // Fallback userId if anonymous sign-in truly fails, but it won't persist Firestore data
+                setUserId(crypto.randomUUID());
+                showNotification('Gagal autentikasi Firebase. Menggunakan ID sementara (data tidak akan tersimpan).', 'error');
+                setIsAuthReady(true);
+              }
+            }
+          });
+          return unsubscribe; // Return cleanup function for onAuthStateChanged
+        })
+        .catch((error) => {
+          // Handle errors if persistence cannot be set (e.g., browser not supporting IndexedDB or security errors)
+          console.error("Error setting Firebase Auth persistence:", error);
+          showNotification('Gagal mengatur persistensi sesi. Absensi mungkin tidak konsisten antar sesi.', 'warning');
+          // Proceed without persistence, but user should be warned
+          const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
+            if (user) {
+              setUserId(user.uid);
+              setIsAuthReady(true);
+            } else {
+              signInAnonymously(authInstance).then(userCred => setUserId(userCred.user.uid)).catch(e => console.error(e));
+              setIsAuthReady(true);
+            }
+          });
+          return unsubscribe; // Return cleanup function
+        });
     } catch (error) {
       console.error('Error initializing Firebase:', error);
       showNotification('Gagal inisialisasi Firebase. Periksa konfigurasi.', 'error');
-      setUserId(crypto.randomUUID());
+      setUserId(crypto.randomUUID()); // Fallback
       setIsAuthReady(true);
     }
   }, [showNotification]);
@@ -265,21 +290,20 @@ function App() {
 
       setIsLoadingLocation(false);
       setHasLocationAttemptFailed(false);
-      showNotification('');
+      showNotification(''); // Clear loading notification
 
-      if (attendanceStatus.includes('BELUM ABSEN') && dist <= MAX_DISTANCE_METERS) {
-        setIsAbsenButtonDisabled(false);
-        showNotification('Lokasi Anda terdeteksi. Silakan absen.', 'info');
-      } else if (dist > MAX_DISTANCE_METERS) {
-        setIsAbsenButtonDisabled(true);
-        setAttendanceStatus('GAGAL ABSEN');
-        showNotification(
-          `Anda berada ${dist.toFixed(
-            1
-          )} meter dari toko. Mohon mendekat ke lokasi toko untuk absen.`,
-          'error'
-        );
-      }
+      // Ini akan dipicu ulang oleh `checkAttendanceStatus`
+      // if (attendanceStatus.includes('BELUM ABSEN') && dist <= MAX_DISTANCE_METERS) {
+      //   setIsAbsenButtonDisabled(false);
+      //   showNotification('Lokasi Anda terdeteksi. Silakan absen.', 'info');
+      // } else if (dist > MAX_DISTANCE_METERS) {
+      //   setIsAbsenButtonDisabled(true);
+      //   setAttendanceStatus('GAGAL ABSEN');
+      //   showNotification(
+      //     `Anda berada ${dist.toFixed(1)} meter dari toko. Mohon mendekat ke lokasi toko untuk absen.`,
+      //     'error'
+      //   );
+      // }
     };
 
     const error = (err) => {
@@ -291,7 +315,7 @@ function App() {
       setDistanceToStore(null);
       setIsAbsenButtonDisabled(true);
       setHasLocationAttemptFailed(true);
-      setAttendanceStatus('GAGAL ABSEN');
+      setAttendanceStatus('GAGAL ABSEN'); // Set status to failed due to location issue
 
       let errorMessage = 'Gagal mendapatkan lokasi Anda! Mohon izinkan akses lokasi di browser Anda.';
       if (err.code === err.PERMISSION_DENIED) {
@@ -301,7 +325,7 @@ function App() {
       } else if (err.code === err.TIMEOUT) {
         errorMessage = 'Waktu habis untuk mendapatkan lokasi. Periksa koneksi atau GPS Anda.';
       }
-      showNotification(errorMessage, 'error', 0);
+      showNotification(errorMessage, 'error', 0); // Notifikasi tidak hilang otomatis
     };
 
     const options = {
@@ -311,8 +335,7 @@ function App() {
     };
 
     navigator.geolocation.getCurrentPosition(success, error, options);
-  }, [attendanceStatus, showNotification]);
-
+  }, [showNotification]); // attendanceStatus removed as dependency here to prevent circular dependency for getLocation
 
   // Periksa status absen saat komponen dimuat, userID berubah, ATAU KETIKA HALAMAN BERUBAH KE ATTENDANCE
   const checkAttendanceStatus = useCallback(async () => {
@@ -323,58 +346,87 @@ function App() {
       const todayStr = today.toISOString().slice(0, 10); // FormatYYYY-MM-DD
 
       const q = query(
-        collection(db, `artifacts/${appId}/users/${userId}/attendance`),
+        collection(db, `artifacts/${appId}/users/${userId}/attendance`), // Menggunakan userId (dari Firebase Auth)
         where('date', '==', todayStr)
       );
       const querySnapshot = await getDocs(q);
 
       if (!querySnapshot.empty) {
-        const docData = querySnapshot.docs[0].data();
-        setAttendanceStatus(`SUDAH ABSEN (Pukul ${docData.time})`);
-        setLastCheckInTime(docData.timestamp);
-        setIsAbsenButtonDisabled(true);
-        setShowAbsenButton(false);
-        showNotification(`Anda SUDAH ABSEN hari ini pada ${docData.time}.`, 'warning');
-      } else {
-        setAttendanceStatus('BELUM ABSEN');
-        setLastCheckInTime(null); // Ini aman karena hanya di-set saat BELUM ABSEN
-        setShowAbsenButton(true);
-        // Hanya aktifkan tombol jika lokasi sudah terdeteksi dan dalam radius
-        if (userLocation && distanceToStore !== null && distanceToStore <= MAX_DISTANCE_METERS) {
-          setIsAbsenButtonDisabled(false);
-          showNotification('Lokasi Anda terdeteksi. Silakan absen.', 'info');
-        } else if (userLocation && distanceToStore !== null && distanceToStore > MAX_DISTANCE_METERS) {
-          setIsAbsenButtonDisabled(true);
-          setAttendanceStatus('GAGAL ABSEN');
-          showNotification(
-            `Anda berada ${distanceToStore.toFixed(
-              1
-            )} meter dari toko. Mohon mendekat ke lokasi toko untuk absen.`,
-            'error'
-          );
+        // Cari absensi yang berhasil untuk hari ini
+        const successfulAttendance = querySnapshot.docs.find(doc => doc.data().status === 'Berhasil');
+
+        if (successfulAttendance) {
+          const docData = successfulAttendance.data();
+          setAttendanceStatus(`SUDAH ABSEN (Pukul ${docData.time})`);
+          setLastCheckInTime(docData.timestamp);
+          setIsAbsenButtonDisabled(true); // Pastikan disabled jika sudah absen berhasil
+          setShowAbsenButton(false);      // Pastikan tombol absen disembunyikan
+          showNotification(`Anda SUDAH ABSEN hari ini pada ${docData.time}.`, 'warning');
         } else {
-           setIsAbsenButtonDisabled(true);
+          // Jika ada catatan tapi tidak ada yang berhasil (semua gagal)
+          setAttendanceStatus('BELUM ABSEN'); // Kembali ke BELUM ABSEN agar bisa mencoba lagi jika berada di lokasi yang benar
+          setLastCheckInTime(null);
+          setShowAbsenButton(true);
+
+          if (userLocation && distanceToStore !== null) {
+            if (distanceToStore <= MAX_DISTANCE_METERS) {
+              setIsAbsenButtonDisabled(false);
+              showNotification('Lokasi Anda terdeteksi. Silakan absen.', 'info');
+            } else {
+              setIsAbsenButtonDisabled(true);
+              setAttendanceStatus('GAGAL ABSEN'); // Tetapkan sebagai gagal jika jauh
+              showNotification(
+                `Anda berada ${distanceToStore.toFixed(1)} meter dari toko. Mohon mendekat ke lokasi toko untuk absen.`,
+                'error'
+              );
+            }
+          } else {
+            setIsAbsenButtonDisabled(true);
+          }
+        }
+      } else {
+        // Jika belum ada absensi sama sekali untuk hari ini
+        setAttendanceStatus('BELUM ABSEN');
+        setLastCheckInTime(null);
+        setShowAbsenButton(true);
+
+        // Logika untuk mengaktifkan/menonaktifkan tombol absen berdasarkan lokasi
+        if (userLocation && distanceToStore !== null) {
+          if (distanceToStore <= MAX_DISTANCE_METERS) {
+            setIsAbsenButtonDisabled(false); // Aktifkan jika di dalam jangkauan
+            showNotification('Lokasi Anda terdeteksi. Silakan absen.', 'info');
+          } else {
+            setIsAbsenButtonDisabled(true); // Nonaktifkan jika di luar jangkauan
+            setAttendanceStatus('GAGAL ABSEN'); // Update status jika terlalu jauh
+            showNotification(
+              `Anda berada ${distanceToStore.toFixed(1)} meter dari toko. Mohon mendekat ke lokasi toko untuk absen.`,
+              'error'
+            );
+          }
+        } else {
+          // Jika lokasi belum terdeteksi, tombol tetap disabled
+          setIsAbsenButtonDisabled(true);
         }
       }
     } catch (e) {
       console.error('Error checking attendance status:', e);
       showNotification('Gagal memeriksa status absen. Silakan coba lagi.', 'error');
     }
-  }, [db, userId, isAuthReady, userLocation, distanceToStore, showNotification]);
+  }, [db, userId, isAuthReady, userLocation, distanceToStore, showNotification]); // Dependencies tetap sama agar update lokasi memicu check
 
-  // Effect untuk memanggil checkAttendanceStatus
+  // Effect sentral untuk halaman attendance:
+  // Memastikan checkAttendanceStatus dan getLocation dipicu dengan benar
   useEffect(() => {
-    if (currentPage === 'attendance') { // Panggil hanya jika di halaman attendance
+    if (currentPage === 'attendance' && isAuthReady) {
+      // Selalu periksa status absen dari Firebase ketika masuk ke halaman ini
       checkAttendanceStatus();
-    }
-  }, [currentPage, checkAttendanceStatus]); // Tambahkan currentPage sebagai dependency
 
-  // Effect untuk mendapatkan lokasi saat komponen dimuat atau auth ready
-  useEffect(() => {
-    if (isAuthReady && !userLocation && !isLoadingLocation && !hasLocationAttemptFailed) {
-      getLocation();
+      // Dapatkan lokasi hanya jika belum ada lokasi, tidak sedang loading, dan tidak ada kegagalan permanen
+      if (!userLocation && !isLoadingLocation && !hasLocationAttemptFailed) {
+        getLocation();
+      }
     }
-  }, [isAuthReady, userLocation, isLoadingLocation, hasLocationAttemptFailed, getLocation]);
+  }, [currentPage, isAuthReady, userLocation, isLoadingLocation, hasLocationAttemptFailed, checkAttendanceStatus, getLocation]);
 
 
   // Handle Absen Sekarang
@@ -406,13 +458,24 @@ function App() {
     let status = 'Berhasil';
     let reason = null;
 
-    if (attendanceStatus.includes('SUDAH ABSEN')) {
+    // Periksa kembali status absen sebelum mencatat, untuk mencegah double absen
+    const q = query(
+      collection(db, `artifacts/${appId}/users/${userId}/attendance`),
+      where('date', '==', todayStr),
+      where('status', '==', 'Berhasil') // Hanya cari yang sudah berhasil
+    );
+    const existingAttendanceSnapshot = await getDocs(q);
+
+    if (!existingAttendanceSnapshot.empty) {
         const durationSeconds = absenProcessStartTime ? ((new Date().getTime() - absenProcessStartTime.getTime()) / 1000) : 0;
         showNotification(
-            `Anda SUDAH ABSEN hari ini pada ${lastCheckInTime ? new Date(lastCheckInTime).toLocaleTimeString('id-ID') : ''} (durasi: ${durationSeconds.toFixed(2)} detik). Anda hanya bisa absen sekali dalam satu hari kalender.`,
-            'warning'
+            `Anda SUDAH ABSEN hari ini pada ${currentTimeStr}. Anda hanya bisa absen sekali dalam satu hari kalender.`, // Waktu disesuaikan dengan current
+            'warning',
+            3000 // Notifikasi dipercepat menjadi 3 detik
         );
         setAbsenProcessStartTime(null);
+        setIsAbsenButtonDisabled(true); // Pastikan tombol dinonaktifkan
+        setShowAbsenButton(false); // Pastikan tombol absen disembunyikan
         return;
     }
 
@@ -423,7 +486,8 @@ function App() {
       const durationSeconds = absenProcessStartTime ? ((new Date().getTime() - absenProcessStartTime.getTime()) / 1000) : 0;
       showNotification(
         `ABSEN GAGAL! Anda berada ${distanceToStore.toFixed(1)} meter dari toko (durasi: ${durationSeconds.toFixed(2)} detik). Mohon mendekat ke lokasi toko untuk absen.`,
-        'error'
+        'error',
+        3000 // Notifikasi dipercepat menjadi 3 detik
       );
       setIsAbsenButtonDisabled(true);
       setAbsenProcessStartTime(null);
@@ -432,7 +496,7 @@ function App() {
 
     try {
       setIsAbsenButtonDisabled(true);
-      await addDoc(collection(db, `artifacts/${appId}/users/${userId}/attendance`), {
+      await addDoc(collection(db, `artifacts/${appId}/users/${userId}/attendance`), { // Menggunakan userId (dari Firebase Auth)
         timestamp: currentTimestamp.toISOString(),
         date: todayStr,
         time: currentTimeStr,
@@ -449,12 +513,13 @@ function App() {
       const durationSeconds = absenProcessStartTime ? ((new Date().getTime() - absenProcessStartTime.getTime()) / 1000) : 0;
       showNotification(
         `Absen Anda BERHASIL dicatat pada ${currentTimeStr} (durasi: ${durationSeconds.toFixed(2)} detik)! Terima kasih.`,
-        'success'
+        'success',
+        3000 // Notifikasi dipercepat menjadi 3 detik
       );
     } catch (e) {
       console.error('Error adding document: ', e);
       const durationSeconds = absenProcessStartTime ? ((new Date().getTime() - absenProcessStartTime.getTime()) / 1000) : 0;
-      showNotification(`Gagal mencatat absen (durasi: ${durationSeconds.toFixed(2)} detik). Silakan coba lagi.`, 'error');
+      showNotification(`Gagal mencatat absen (durasi: ${durationSeconds.toFixed(2)} detik). Silakan coba lagi.`, 'error', 3000);
       setIsAbsenButtonDisabled(false);
       setShowAbsenButton(true);
       setAttendanceStatus('GAGAL ABSEN');
@@ -496,8 +561,8 @@ function App() {
       csvContent += rowData.map((field) => `"${String(field).replace(/"/g, '""')}"`).join(',') + '\n';
     });
 
-    // Tambahkan ringkasan hari absen
-    csvContent += `\nTotal Hari Absen (Tidak ada absen berhasil di hari tsb.): ${absentDaysCount}\n`;
+    // Tambahkan ringkasan hari hadir
+    csvContent += `\nTotal Hari Hadir: ${presentDaysCount}\n`; // Diubah ke Hari Hadir
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
@@ -553,9 +618,9 @@ function App() {
       ]);
     });
 
-    // Tambahkan ringkasan hari absen di baris paling bawah
+    // Tambahkan ringkasan hari hadir di baris paling bawah
     wsData.push([]); // Baris kosong
-    wsData.push(['Total Hari Absen (Tidak ada absen berhasil di hari tsb.):', absentDaysCount]);
+    wsData.push(['Total Hari Hadir:', presentDaysCount]); // Diubah ke Hari Hadir
 
 
     const ws = window.XLSX.utils.aoa_to_sheet(wsData);
@@ -630,12 +695,12 @@ function App() {
         record.longitude.toFixed(6),
         record.distanceToStore.toFixed(1),
         record.status,
-        record.reason || ''
+        record.reason || '',
     ]);
 
     // Menyiapkan data untuk ringkasan di bawah tabel
     const summaryData = [
-      ['Total Hari Absen (Tidak ada absen berhasil di hari tsb.):', absentDaysCount]
+      ['Total Hari Hadir:', presentDaysCount] // Diubah ke Hari Hadir
     ];
 
     doc.autoTable({
@@ -703,14 +768,14 @@ function App() {
 
     setFilterLoading(true);
     setDashboardRecords([]);
-    setAbsentDaysCount(0); // Reset count before fetching
+    setPresentDaysCount(0); // Reset count before fetching
 
     try {
       const startDate = new Date(selectedYear, selectedMonth - 1, 1);
       const endDate = new Date(selectedYear, selectedMonth, 0); // Last day of the month
 
       const q = query(
-        collection(db, `artifacts/${appId}/users/${userId}/attendance`),
+        collection(db, `artifacts/${appId}/users/${userId}/attendance`), // Menggunakan userId (dari Firebase Auth)
         where('timestamp', '>=', startDate.toISOString()),
         where('timestamp', '<=', endDate.toISOString())
       );
@@ -721,30 +786,26 @@ function App() {
       records.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       setDashboardRecords(records);
 
-      // --- Logika Perhitungan Hari Absen ---
-      const attendanceByDate = {}; // { 'YYYY-MM-DD': { hasSuccessful: false, hasFailed: false } }
-      records.forEach(record => {
-        const dateKey = record.date;
-        if (!attendanceByDate[dateKey]) {
-          attendanceByDate[dateKey] = { hasSuccessful: false, hasFailed: false };
-        }
-        if (record.status === 'Berhasil') {
-          attendanceByDate[dateKey].hasSuccessful = true;
-        } else if (record.status === 'Gagal') {
-          attendanceByDate[dateKey].hasFailed = true;
-        }
-      });
+      // --- Logika Perhitungan Hari Hadir ---
+      const successfulAttendanceDates = new Set(
+        records.filter(record => record.status === 'Berhasil').map(record => record.date)
+      );
 
-      let calculatedAbsentDays = 0;
-      for (const dateKey in attendanceByDate) {
-        // Jika tidak ada absen berhasil pada tanggal tersebut, tetapi ada setidaknya satu upaya absen (berhasil atau gagal)
-        // Kita hitung sebagai absen jika tidak ada 'Berhasil' tapi ada catatan (berarti semua gagal di hari itu).
-        if (!attendanceByDate[dateKey].hasSuccessful && attendanceByDate[dateKey].hasFailed) {
-            calculatedAbsentDays++;
+      let calculatedPresentDays = 0;
+      const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate(); // Total hari dalam bulan yang dipilih
+
+      for (let i = 1; i <= daysInMonth; i++) {
+        const day = i < 10 ? `0${i}` : `${i}`;
+        const month = selectedMonth < 10 ? `0${selectedMonth}` : `${selectedMonth}`;
+        const dateKey = `${selectedYear}-${month}-${day}`;
+
+        // Jika pada tanggal tersebut ADA catatan absensi berhasil
+        if (successfulAttendanceDates.has(dateKey)) {
+          calculatedPresentDays++;
         }
       }
-      setAbsentDaysCount(calculatedAbsentDays);
-      // --- Akhir Logika Perhitungan Hari Absen ---
+      setPresentDaysCount(calculatedPresentDays);
+      // --- Akhir Logika Perhitungan Hari Hadir ---
 
     } catch (e) {
       console.error('Error fetching dashboard records:', e);
@@ -835,14 +896,14 @@ function App() {
         Absen berhasil: ${successfulCheckIns}
         Absen gagal: ${failedCheckIns}
         Jumlah hari absensi unik (ada catatan absen): ${uniqueDates}
-        Total hari absen (tidak ada absen berhasil di hari tsb.): ${absentDaysCount}
+        Total hari hadir: ${presentDaysCount}
         Total hari dalam bulan ini: ${totalDaysInMonth}
         
         Data detail setiap absensi:
         ${dashboardRecords.map(rec => `Tanggal: ${rec.date}, Waktu: ${rec.time}, Status: ${rec.status}, Jarak dari toko: ${rec.distanceToStore} meter, Alasan: ${rec.reason || 'N/A'}`).join('\n')}
 
         Mohon berikan ringkasan yang komprehensif dan wawasan penting (insight) dari data absensi di atas. Fokus pada:
-        1. Statistik kunci (total absen, berhasil, gagal, hari unik, hari absen).
+        1. Statistik kunci (total absen, berhasil, gagal, hari unik, hari hadir).
         2. Keteraturan absensi.
         3. Jika ada absen gagal, berikan analisis singkat mengapa dan saran perbaikan.
         4. Tentukan apakah karyawan tersebut menunjukkan kinerja absensi yang baik atau perlu perhatian.
@@ -880,7 +941,7 @@ function App() {
     } finally {
       setIsGeneratingSummary(false);
     }
-  }, [dashboardRecords, selectedMonth, selectedYear, showNotification, absentDaysCount]);
+  }, [dashboardRecords, selectedMonth, selectedYear, showNotification, presentDaysCount]);
 
 
   return (
@@ -921,21 +982,24 @@ function App() {
 
       {/* Header Aplikasi */}
       <header className="w-full max-w-lg bg-white rounded-lg shadow-xl p-6 mb-6 text-center">
-        {/* Perubahan: JUDUL DIBUAT KAPITAL SEMUA, diubah warnanya menjadi hitam */}
         <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold uppercase text-black mb-2">Aplikasi Absensi Karyawan</h1>
-        {/* Perubahan: warna teks "Latucya" diubah menjadi biru BRI dan teks "BRILink" diubah menjadi warna Oranye */}
         <h2 className="text-4xl md:text-5xl lg:text-6xl font-semibold leading-tight">
-          <span style={{ color: '#004F98' }}>Latucya</span> <span className="text-orange-600">BRILink</span>
+          <span style={{ color: '#004F98', fontWeight: 'bold' }}>Latucya</span> <span className="text-orange-600 font-bold">BRILink</span>
         </h2>
       </header>
 
       {/* Navigasi (Sederhana) */}
-      <div className="w-full max-w-lg bg-white rounded-xl shadow-md p-4 mb-6 flex justify-around">
+      <div className="w-full max-w-lg bg-white rounded-xl shadow-md p-4 mb-6 flex justify-around gap-x-4">
         <button
           onClick={() => {
             setCurrentPage('attendance');
             setIsAuthenticatedAdmin(false); // Reset admin auth when navigating away
             setAdminPassword('');
+            // Reset location states and force re-detection when returning to attendance page
+            setUserLocation(null);
+            setDistanceToStore(null);
+            setHasLocationAttemptFailed(false);
+            showNotification('', ''); // Clear any lingering notifications
           }}
           className={`px-6 py-3 sm:px-8 sm:py-4 rounded-xl font-semibold text-xl sm:text-2xl transition-all duration-300 ${
             currentPage === 'attendance'
@@ -1014,13 +1078,16 @@ function App() {
           ) : (
             <button
               onClick={() => {
-                setIsAbsenButtonDisabled(true);
-                setShowAbsenButton(true);
-                setUserLocation(null);
-                setDistanceToStore(null);
-                setHasLocationAttemptFailed(false);
-                showNotification('', '');
-                getLocation();
+                // Saat tombol "Kembali ke Halaman Utama" diklik
+                // Cukup ubah halaman, reset status lokasi untuk memaksa deteksi ulang.
+                setCurrentPage('attendance'); // Ini sebenarnya tidak berubah, tapi memastikan efek terpanggil
+                setIsAbsenButtonDisabled(true); // Default disabled sampai status valid
+                setShowAbsenButton(true); // Tampilkan tombol absen lagi
+                setUserLocation(null); // Reset lokasi untuk memaksa re-get
+                setDistanceToStore(null); // Reset jarak
+                setHasLocationAttemptFailed(false); // Reset status gagal lokasi
+                showNotification('', ''); // Hapus notifikasi lama
+                // getLocation() dan checkAttendanceStatus() akan terpanggil melalui useEffect
               }}
               className="w-full py-4 px-6 rounded-xl bg-blue-600 text-white text-xl font-bold shadow-lg hover:bg-blue-700 transition-all duration-300"
             >
@@ -1114,9 +1181,9 @@ function App() {
                   Statistik {new Date(selectedYear, selectedMonth - 1).toLocaleString('id-ID', { month: 'long', year: 'numeric' })}:
                 </h4>
                 <p className="text-md text-gray-600">
-                  <span className="font-medium">Total Hari Absen:</span>{' '}
-                  <span className="font-bold text-red-600">{absentDaysCount} hari</span>
-                  <span className="text-sm text-gray-500 ml-2">(Tidak ada absen berhasil di hari tsb.)</span>
+                  <span className="font-medium">Total Hari Hadir:</span>{' '}
+                  <span className="font-bold text-green-600">{presentDaysCount} hari</span>
+                  <span className="text-sm text-gray-500 ml-2">(Hari dengan setidaknya satu absen berhasil)</span>
                 </p>
               </div>
 
