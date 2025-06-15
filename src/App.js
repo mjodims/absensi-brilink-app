@@ -745,7 +745,7 @@ function App() {
     } finally {
       setFilterLoading(false);
     }
-  }, [db, userId, isAuthReady, selectedMonth, selectedYear, showNotification, appId]); // Removed appId from dependencies for useCallback, but it's still needed if we reference it directly, so putting it back for safety.
+  }, [db, userId, isAuthReady, selectedMonth, selectedYear, showNotification]); // Removed appId from dependencies
 
   // Panggil fetchDashboardRecords saat bulan/tahun atau auth state berubah
   useEffect(() => {
@@ -873,7 +873,7 @@ function App() {
     } finally {
       setIsGeneratingSummary(false);
     }
-  }, [dashboardRecords, selectedMonth, selectedYear, showNotification, absentDaysCount]); // Added absentDaysCount to dependencies
+  }, [dashboardRecords, selectedMonth, selectedYear, showNotification, absentDaysCount]);
 
 
   return (
