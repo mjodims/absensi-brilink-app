@@ -56,7 +56,8 @@ const appId = 'latucya-brilink-attendance-prod';
 // PENTING: Anda HARUS MENGGANTI nilai-nilai placeholder di bawah ini
 // dengan konfigurasi AKTUAL dari proyek Firebase Anda sendiri
 // yang Anda dapatkan dari Firebase Console (Project settings -> Your apps).
-// Jika tidak diganti, aplikasi tidak akan terhubung ke database Anda.
+// Jika tidak diganti, aplikasi tidak akan terhubung ke database Anda,
+// dan fitur penyimpanan/pengambilan data tidak akan berfungsi.
 const firebaseConfig = {
   apiKey: "YOUR_FIREBASE_API_KEY", 
   authDomain: "YOUR_FIREBASE_PROJECT_ID.firebaseapp.com",
@@ -179,7 +180,7 @@ function App() {
       if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
         console.error("Firebase config is incomplete. Please update it with your actual Firebase project details.");
         showNotification("Firebase tidak terkonfigurasi. Aplikasi mungkin tidak berfungsi penuh.", "error", 0);
-        // Fallback to anonymous sign-in even if config is incomplete to allow UI to load
+        // Fallback to anonymous sign-in even if config is totally invalid
         const app = initializeApp(firebaseConfig); // This might still error if config is totally invalid
         const authInstance = getAuth(app);
         const dbInstance = getFirestore(app);
