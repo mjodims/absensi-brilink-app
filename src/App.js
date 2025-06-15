@@ -853,14 +853,11 @@ function App() {
     };
     const datePart = date.toLocaleDateString('id-ID', dateOptions);
 
-    // Format time part
-    const timeOptions = {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false // Use 24-hour format
-    };
-    const timePart = date.toLocaleTimeString('id-ID', timeOptions);
+    // Manually format time part to ensure HH:MM:SS
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    const timePart = `${hours}:${minutes}:${seconds}`; // Changed this line
 
     return `${datePart}, ${timePart} WIB`;
   };
