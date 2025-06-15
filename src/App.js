@@ -361,12 +361,12 @@ function App() {
       console.error('Error checking attendance status:', e);
       showNotification('Gagal memeriksa status absen. Silakan coba lagi.', 'error');
     }
-  }, [db, userId, isAuthReady, userLocation, distanceToStore, showNotification]); // Removed appId from dependencies
+  }, [db, userId, isAuthReady, userLocation, distanceToStore, showNotification]);
 
   // Effect untuk memanggil checkAttendanceStatus
   useEffect(() => {
     checkAttendanceStatus();
-  }, [checkAttendanceStatus]); // checkAttendanceStatus is now the dependency
+  }, [checkAttendanceStatus]);
 
 
   // Effect untuk mendapatkan lokasi saat komponen dimuat atau auth ready
@@ -745,7 +745,7 @@ function App() {
     } finally {
       setFilterLoading(false);
     }
-  }, [db, userId, isAuthReady, selectedMonth, selectedYear, showNotification]); // Removed appId from dependencies
+  }, [db, userId, isAuthReady, selectedMonth, selectedYear, showNotification]);
 
   // Panggil fetchDashboardRecords saat bulan/tahun atau auth state berubah
   useEffect(() => {
@@ -981,7 +981,8 @@ function App() {
                 : 'bg-red-100 border-l-4 border-red-500' // Merah (for GAGAL ABSEN)
             }`}
           >
-            <p className="text-lg font-bold text-gray-800 whitespace-nowrap overflow-hidden text-ellipsis">
+            {/* Perubahan di sini: menghapus class untuk memungkinkan teks wrapping */}
+            <p className="text-lg font-bold text-gray-800">
               Status Absen Hari Ini: {attendanceStatus}
             </p>
           </div>
