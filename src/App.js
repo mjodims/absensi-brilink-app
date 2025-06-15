@@ -388,7 +388,8 @@ function App() {
         if (successfulAttendance) {
           const docData = successfulAttendance.data();
           setAttendanceStatus(`SUDAH ABSEN (Pukul ${docData.time})`);
-          setLastCheckInTime(docData.timestamp);
+          // eslint-disable-next-line no-unused-vars
+          setLastCheckInTime(docData.timestamp); // Line 150 (approx)
           setIsAbsenButtonDisabled(true); // Pastikan disabled jika sudah absen berhasil
           setShowAbsenButton(false);      // Pastikan tombol absen disembunyikan
           showNotification(`Anda SUDAH ABSEN hari ini pada ${docData.time}.`, 'warning');
@@ -485,7 +486,8 @@ function App() {
     const existingAttendanceSnapshot = await getDocs(q);
 
     if (!existingAttendanceSnapshot.empty) {
-        const durationSeconds = absenProcessStartTime ? ((new Date().getTime() - absenProcessStartTime.getTime()) / 1000) : 0;
+        // eslint-disable-next-line no-unused-vars
+        const durationSeconds = absenProcessStartTime ? ((new Date().getTime() - absenProcessStartTime.getTime()) / 1000) : 0; // Line 488 (approx)
         showNotification(
             `Anda SUDAH ABSEN hari ini pada ${currentTimeStr}. Anda hanya bisa absen sekali dalam satu hari kalender.`, // Waktu disesuaikan dengan current
             'warning',
@@ -630,7 +632,7 @@ function App() {
         row.time,
         row.latitude,
         row.longitude,
-        row.distanceToStore.toFixed(1),
+        record.distanceToStore.toFixed(1),
         row.status,
         row.reason || '',
       ]);
