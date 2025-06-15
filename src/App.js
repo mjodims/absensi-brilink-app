@@ -625,14 +625,14 @@ function App() {
 
     const wsData = [headers]; // Array of arrays for worksheet data
 
-    data.forEach((row) => {
+    data.forEach((row) => { // 'row' is the correct variable here
       wsData.push([
         new Date(row.timestamp).toLocaleDateString('id-ID', { weekday: 'long' }),
         new Date(row.timestamp).toLocaleDateString('id-ID'),
         row.time,
         row.latitude,
         row.longitude,
-        record.distanceToStore.toFixed(1),
+        row.distanceToStore.toFixed(1), // Corrected: was 'record.distanceToStore'
         row.status,
         row.reason || '',
       ]);
