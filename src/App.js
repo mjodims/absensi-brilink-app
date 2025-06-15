@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, addDoc, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth'; // Removed signInWithCustomToken
+import { getFirestore, collection, addDoc, query, where, getDocs } from 'firebase/firestore'; // Removed doc, getDoc
 
 // Load SheetJS (XLSX library) from CDN
 const loadXlsxScript = () => {
@@ -53,11 +53,8 @@ const loadPdfScript = () => {
 const appId = 'latucya-brilink-attendance-prod';
 
 // Konfigurasi Firebase untuk deployment.
-// PENTING: Anda HARUS MENGGANTI nilai-nilai placeholder di bawah ini
-// dengan konfigurasi AKTUAL dari proyek Firebase Anda sendiri
-// yang Anda dapatkan dari Firebase Console (Project settings -> Your apps).
-// Jika tidak diganti, aplikasi tidak akan terhubung ke database Anda,
-// dan fitur penyimpanan/pengambilan data tidak akan berfungsi.
+// PENTING: Nilai-nilai ini sudah diperbarui dengan konfigurasi AKTUAL dari proyek Firebase Anda.
+// Aplikasi sekarang akan terhubung ke database Firebase Anda.
 const firebaseConfig = {
   apiKey: "AIzaSyDnkcXvEHJWo9F2Hw18dM62npzsOByy0Tw",
   authDomain: "absensi-latucya.firebaseapp.com",
@@ -71,7 +68,7 @@ const firebaseConfig = {
 // initialAuthToken hanya digunakan di lingkungan Canvas untuk autentikasi kustom.
 // Untuk aplikasi yang di-deploy, kita akan menggunakan signInAnonymously sebagai fallback
 // atau Anda akan mengimplementasikan metode autentikasi lain (misalnya, email/password).
-const initialAuthToken = null; // Tetapkan ke null untuk deployment produksi di luar Canvas
+// Variabel ini dihapus karena tidak lagi digunakan.
 // --- END Perubahan untuk Deployment Netlify ---
 
 
@@ -142,8 +139,7 @@ const Notification = ({ message, type, onClose }) => {
 // Komponen Utama Aplikasi
 function App() {
   const [db, setDb] = useState(null);
-  const [auth, setAuth] = useState(null);
-  const [userId, setUserId] = useState(null);
+  const [userId, setUserId] = useState(null); // Removed auth state
   const [currentPage, setCurrentPage] = useState('attendance'); // 'attendance' or 'dashboard'
 
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -173,6 +169,14 @@ function App() {
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
 
+  // Fungsi untuk menampilkan notifikasi
+  const showNotification = useCallback((message, type, duration = 5000) => {
+    setNotification({ message, type });
+    if (duration > 0) {
+      setTimeout(() => setNotification({ message: '', type: '' }), duration);
+    }
+  }, []); // showNotification sekarang adalah useCallback
+
   // Inisialisasi Firebase dan Autentikasi
   useEffect(() => {
     try {
@@ -184,7 +188,7 @@ function App() {
         const app = initializeApp(firebaseConfig); // This might still error if config is totally invalid
         const authInstance = getAuth(app);
         const dbInstance = getFirestore(app);
-        setAuth(authInstance);
+        // setAuth(authInstance); // Removed unused setAuth
         setDb(dbInstance);
         signInAnonymously(authInstance).then(userCred => setUserId(userCred.user.uid)).catch(e => console.error(e));
         setIsAuthReady(true);
@@ -195,7 +199,7 @@ function App() {
       const authInstance = getAuth(app);
       const dbInstance = getFirestore(app);
 
-      setAuth(authInstance);
+      // setAuth(authInstance); // Removed unused setAuth
       setDb(dbInstance);
 
       const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
@@ -203,8 +207,7 @@ function App() {
           setUserId(user.uid);
           setIsAuthReady(true);
         } else {
-          // Hanya signInAnonymously jika initialAuthToken tidak ada
-          // (initialAuthToken hanya ada di lingkungan Canvas)
+          // Hanya signInAnonymously karena initialAuthToken tidak ada
           try {
             await signInAnonymously(authInstance);
             setUserId(authInstance.currentUser?.uid || crypto.randomUUID()); // Pastikan ID ada
@@ -225,7 +228,8 @@ function App() {
       setUserId(crypto.randomUUID()); // Fallback
       setIsAuthReady(true);
     }
-  }, []);
+  }, [showNotification]); // showNotification added as dependency
+
 
   // Set interval untuk waktu saat ini
   useEffect(() => {
@@ -233,14 +237,6 @@ function App() {
       setCurrentTime(new Date());
     }, 1000);
     return () => clearInterval(timer);
-  }, []);
-
-  // Fungsi untuk menampilkan notifikasi
-  const showNotification = useCallback((message, type, duration = 5000) => {
-    setNotification({ message, type });
-    if (duration > 0) {
-      setTimeout(() => setNotification({ message: '', type: '' }), duration);
-    }
   }, []);
 
   // Mengambil lokasi pengguna
@@ -315,60 +311,61 @@ function App() {
     };
 
     navigator.geolocation.getCurrentPosition(success, error, options);
-  }, [attendanceStatus, showNotification]);
+  }, [attendanceStatus, showNotification]); // showNotification added as dependency
+
 
   // Periksa status absen saat komponen dimuat atau userID berubah
-  useEffect(() => {
+  const checkAttendanceStatus = useCallback(async () => {
     if (!db || !userId || !isAuthReady) return;
 
-    const checkAttendanceStatus = async () => {
-      try {
-        const today = new Date();
-        const todayStr = today.toISOString().slice(0, 10); // FormatYYYY-MM-DD
+    try {
+      const today = new Date();
+      const todayStr = today.toISOString().slice(0, 10); // FormatYYYY-MM-DD
 
-        const q = query(
-          collection(db, `artifacts/${appId}/users/${userId}/attendance`),
-          where('date', '==', todayStr)
-        );
-        const querySnapshot = await getDocs(q);
+      const q = query(
+        collection(db, `artifacts/${appId}/users/${userId}/attendance`),
+        where('date', '==', todayStr)
+      );
+      const querySnapshot = await getDocs(q);
 
-        if (!querySnapshot.empty) {
-          const doc = querySnapshot.docs[0].data();
-          setAttendanceStatus(`SUDAH ABSEN (Pukul ${doc.time})`);
-          setLastCheckInTime(doc.timestamp);
+      if (!querySnapshot.empty) {
+        const docData = querySnapshot.docs[0].data(); // Renamed to avoid conflict with imported doc
+        setAttendanceStatus(`SUDAH ABSEN (Pukul ${docData.time})`);
+        setLastCheckInTime(docData.timestamp);
+        setIsAbsenButtonDisabled(true);
+        setShowAbsenButton(false);
+        showNotification(`Anda SUDAH ABSEN hari ini pada ${docData.time}.`, 'warning');
+      } else {
+        setAttendanceStatus('BELUM ABSEN');
+        setLastCheckInTime(null);
+        setShowAbsenButton(true);
+        // Hanya aktifkan tombol jika lokasi sudah terdeteksi dan dalam radius
+        if (userLocation && distanceToStore !== null && distanceToStore <= MAX_DISTANCE_METERS) {
+          setIsAbsenButtonDisabled(false);
+          showNotification('Lokasi Anda terdeteksi. Silakan absen.', 'info');
+        } else if (userLocation && distanceToStore !== null && distanceToStore > MAX_DISTANCE_METERS) {
           setIsAbsenButtonDisabled(true);
-          setShowAbsenButton(false);
-          showNotification(`Anda SUDAH ABSEN hari ini pada ${doc.time}.`, 'warning');
+          setAttendanceStatus('GAGAL ABSEN'); // Set status to failed
+          showNotification(
+            `Anda berada ${distanceToStore.toFixed(
+              2
+            )} meter dari toko. Mohon mendekat ke lokasi toko untuk absen.`,
+            'error'
+          );
         } else {
-          setAttendanceStatus('BELUM ABSEN');
-          setLastCheckInTime(null);
-          setShowAbsenButton(true);
-          // Hanya aktifkan tombol jika lokasi sudah terdeteksi dan dalam radius
-          if (userLocation && distanceToStore !== null && distanceToStore <= MAX_DISTANCE_METERS) {
-            setIsAbsenButtonDisabled(false);
-            showNotification('Lokasi Anda terdeteksi. Silakan absen.', 'info');
-          } else if (userLocation && distanceToStore !== null && distanceToStore > MAX_DISTANCE_METERS) {
-            setIsAbsenButtonDisabled(true);
-            setAttendanceStatus('GAGAL ABSEN'); // Set status to failed
-            showNotification(
-              `Anda berada ${distanceToStore.toFixed(
-                2
-              )} meter dari toko. Mohon mendekat ke lokasi toko untuk absen.`,
-              'error'
-            );
-          } else {
-             setIsAbsenButtonDisabled(true);
-          }
+           setIsAbsenButtonDisabled(true);
         }
-      } catch (e) {
-        console.error('Error checking attendance status:', e);
-        showNotification('Gagal memeriksa status absen. Silakan coba lagi.', 'error');
       }
-    };
+    } catch (e) {
+      console.error('Error checking attendance status:', e);
+      showNotification('Gagal memeriksa status absen. Silakan coba lagi.', 'error');
+    }
+  }, [db, userId, isAuthReady, userLocation, distanceToStore, showNotification, appId]); // Added appId to dependencies
 
+  // Effect untuk memanggil checkAttendanceStatus
+  useEffect(() => {
     checkAttendanceStatus();
-    // Re-run if userLocation, distanceToStore, or isAuthReady changes, to update button state
-  }, [db, userId, isAuthReady, userLocation, distanceToStore, showNotification]);
+  }, [checkAttendanceStatus]); // checkAttendanceStatus is now the dependency
 
 
   // Effect untuk mendapatkan lokasi saat komponen dimuat atau auth ready
@@ -684,7 +681,7 @@ function App() {
     } finally {
       setFilterLoading(false);
     }
-  }, [db, userId, isAuthReady, selectedMonth, selectedYear, showNotification]);
+  }, [db, userId, isAuthReady, selectedMonth, selectedYear, showNotification, appId]); // Added showNotification, appId to dependencies
 
   // Panggil fetchDashboardRecords saat bulan/tahun atau auth state berubah
   useEffect(() => {
